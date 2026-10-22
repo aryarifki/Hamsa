@@ -1,0 +1,36 @@
+{
+  "name": "hamsa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hamsa \u2014 OSINT Intelligence Console for authorized investigations",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs --test tests/*.test.mjs",
+    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs scripts/seed.mjs"
+  },
+  "dependencies": {
+    "libphonenumber-js": "^1.13.15",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/topojson-client": "^3.1.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0"
+  }
+}

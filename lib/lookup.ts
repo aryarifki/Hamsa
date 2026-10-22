@@ -1,0 +1,162 @@
+import { all, newId, now, one, run } from "./db";
+import { audit } from "./audit";
+import { costOf, charge, refund, type ModuleKey } from "./tokens";
+import { investigatePhone } from "./intel/phone";
+import { investigateIp } from "./intel/ip";
+import { investigateEmail } from "./intel/email";
+import { investigateUsername } from "./intel/username";
+import { investigateTelegram } from "./intel/telegram";
+import type { ModuleResult } from "./intel/types";
+import type { User } from "./users";
+
+export interface LookupInput {
+  user: User;
+  module: ModuleKey;
+  target: string;
+  keyword?: string;
+  caseId?: string;
+  ip?: string;
+  userAgent?: string;
+}
+
+export interface LookupRecord {
+  id: string;
+  user_id: string;
+  module: ModuleKey;
+  target: string;
+  status: "ok" | "error";
+  cost: number;
+  provider: string | null;
+  result: string | null;
+  error: string | null;
+  created_at: string;
+  duration_ms: number | null;
+}
+
+export class LookupError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function dispatch(input: LookupInput): Promise<ModuleResult> {
+  switch (input.module) {
+    case "phone":
+      return investigatePhone(input.target);
+    case "ip":
+      return investigateIp(input.target);
+    case "email":
+      return investigateEmail(input.target);
+    case "username":
+      return investigateUsername(input.target);
+    case "telegram":
+      return investigateTelegram(input.target, input.keyword ?? "");
+    default:
+      throw new LookupError(400, "Unknown module");
+  }
+}
+
+export async function runLookup(input: LookupInput) {
+  if (input.user.role === "viewer") {
+    throw new LookupError(403, "Viewer accounts cannot run lookups");
+  }
+
+  const target = input.target.trim();
+  if (!target) throw new LookupError(400, "Target is required");
+  if (target.length > 320) throw new LookupError(400, "Target is too long");
+
+  if (input.caseId) {
+    const owned = one<{ id: string }>("SELECT id FROM cases WHERE id = ? AND user_id = ?", input.caseId, input.user.id);
+    if (!owned) throw new LookupError(404, "Case not found");
+  }
+
+  const cost = costOf(input.module);
+  const balance = charge(input.user.id, cost, `lookup:${input.module}`, "lookup");
+  const id = newId();
+  const startedAt = Date.now();
+
+  run(
+    `INSERT INTO lookups (id, user_id, module, target, status, cost, created_at)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
+    id,
+    input.user.id,
+    input.module,
+    target,
+    cost,
+    now(),
+  );
+
+  try {
+    const result = await dispatch(input);
+    const duration = Date.now() - startedAt;
+    run(
+      "UPDATE lookups SET status = 'ok', provider = ?, result = ?, duration_ms = ? WHERE id = ?",
+      result.sources.filter((s) => s.kind === "provider" || s.kind === "public-api").map((s) => s.name).join(", ") || null,
+      JSON.stringify(result),
+      duration,
+      id,
+    );
+
+    if (input.caseId) {
+      run(
+        "INSERT OR IGNORE INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?)",
+        input.caseId,
+        id,
+        now(),
+      );
+    }
+
+    audit({
+      userId: input.user.id,
+      actor: input.user.email,
+      action: "lookup.run",
+      entity: "lookup",
+      entityId: id,
+      meta: { module: input.module, target, cost, caseId: input.caseId ?? null },
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+
+    return { id, module: input.module, target, cost, balance, durationMs: duration, result };
+  } catch (err) {
+    const message = (err as Error).message.slice(0, 500);
+    run("UPDATE lookups SET status = 'error', error = ?, duration_ms = ? WHERE id = ?", message, Date.now() - startedAt, id);
+    refund(input.user.id, cost, "provider-failure", id);
+    audit({
+      userId: input.user.id,
+      actor: input.user.email,
+      action: "lookup.denied",
+      entity: "lookup",
+      entityId: id,
+      meta: { module: input.module, target, error: message },
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+    throw new LookupError(502, `Lookup failed and was refunded: ${message}`);
+  }
+}
+
+export function historyFor(userId: string, limit = 100): LookupRecord[] {
+  return all<LookupRecord>(
+    `SELECT id, user_id, module, target, status, cost, provider, result, error, created_at, duration_ms
+     FROM lookups WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+    userId,
+    limit,
+  );
+}
+
+export function lookupById(id: string, userId: string): LookupRecord | undefined {
+  return one<LookupRecord>("SELECT * FROM lookups WHERE id = ? AND user_id = ?", id, userId);
+}
+
+export function parsedResult(record: LookupRecord): ModuleResult | null {
+  if (!record.result) return null;
+  try {
+    return JSON.parse(record.result) as ModuleResult;
+  } catch {
+    return null;
+  }
+}

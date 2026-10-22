@@ -1,0 +1,33 @@
+services:
+  hamsa:
+    build: .
+    image: hamsa:1.0.0
+    container_name: hamsa
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HAMSA_DB_PATH: /app/data/hamsa.db
+    ports:
+      # Bind to loopback: put a TLS-terminating reverse proxy in front.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - hamsa-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 4s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+volumes:
+  hamsa-data:
+    driver: local

@@ -1,0 +1,8 @@
+# Hamsa is a private investigative console, not a public site.
+# Nothing here should be indexed or crawled.
+User-agent: *
+Disallow: /
+
+# Health checks may be polled by infrastructure, not search engines.
+User-agent: *
+Allow: /api/health

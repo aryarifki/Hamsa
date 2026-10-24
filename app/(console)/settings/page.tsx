@@ -11,8 +11,8 @@ export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const keys = listApiKeys(user.id);
-  const sessions = all<{ created_at: string; expires_at: string; ip: string | null; user_agent: string | null }>(
+  const keys = await listApiKeys(user.id);
+  const sessions = await all<{ created_at: string; expires_at: string; ip: string | null; user_agent: string | null }>(
     "SELECT created_at, expires_at, ip, user_agent FROM sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 10",
     user.id,
   );

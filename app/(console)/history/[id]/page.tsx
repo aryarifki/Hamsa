@@ -12,11 +12,11 @@ export const dynamic = "force-dynamic";
 export default async function LookupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const record = lookupById(id, user.id);
+  const record = await lookupById(id, user.id);
   if (!record) notFound();
 
   const result = parsedResult(record);
-  const cases = all<{ id: string; code: string; title: string }>(
+  const cases = await all<{ id: string; code: string; title: string }>(
     "SELECT id, code, title FROM cases WHERE user_id = ? AND status = 'open' ORDER BY created_at DESC",
     user.id,
   );

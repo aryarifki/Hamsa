@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { unreadCount } from "@/lib/notify";
 import { Sidebar } from "@/components/Sidebar";
 import { Icon } from "@/components/Icon";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  const unread = await unreadCount(user.id);
 
   return (
     <div className="min-h-screen">
       <Sidebar
         user={{ name: user.name, email: user.email, role: user.role, credits: user.credits }}
+        unread={unread}
       />
       <div className="lg:pl-[248px]">
         <header className="sticky top-0 z-10 hidden h-14 items-center gap-4 border-b border-line-soft bg-ink/80 px-8 backdrop-blur-xl lg:flex">

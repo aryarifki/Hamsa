@@ -1,24 +1,22 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import { requireUser, requireAdmin, userById } from "@/lib/auth";
+import { requireUser, requireAdmin, requireOperator, userById } from "@/lib/auth";
 import { newId, now, one, run } from "@/lib/db";
 import { audit } from "@/lib/audit";
-import { encryptSecret } from "@/lib/crypto";
 import { createApiKey, revokeApiKey, upsertProvider } from "@/lib/security";
 import { grant } from "@/lib/tokens";
-import { probeCctv } from "@/lib/intel/cctv";
-import { randomToken, sha256 } from "@/lib/crypto";
-
-async function meta() {
-  const h = await headers();
-  return {
-    ip: h.get("cf-connecting-ip") ?? h.get("x-real-ip") ?? h.get("x-forwarded-for")?.split(",")[0] ?? undefined,
-    ua: h.get("user-agent") ?? undefined,
-  };
-}
+import { markAllRead } from "@/lib/notify";
+import { registerDevice, revokeDevice, deleteDevice } from "@/lib/track/consent";
+import { createGeofence, deleteGeofence } from "@/lib/track/geofence";
+import {
+  captureCamera,
+  checkCamera,
+  createCamera,
+  deleteCamera,
+  enableCamera,
+  pollCameraEvents,
+} from "@/lib/cctv/service";
 
 /* ───────────────────────────── Cases ───────────────────────────── */
 
@@ -28,14 +26,15 @@ export async function createCaseAction(formData: FormData): Promise<void> {
   const subject = String(formData.get("subject") ?? "").trim();
   const purpose = String(formData.get("purpose") ?? "").trim();
   const authorizationRef = String(formData.get("authorization_ref") ?? "").trim();
-
-  if (title.length < 3) throw new Error("Case title is too short");
-  if (purpose.length < 10) throw new Error("Describe the lawful purpose (at least 10 characters)");
-  if (authorizationRef.length < 3) throw new Error("An authorization reference is required");
+  if (!title) throw new Error("Case title is required");
+  if (purpose.length < 10) throw new Error("Describe the purpose (at least 10 characters)");
+  if (authorizationRef.length < 3) throw new Error("Authorization reference is required");
 
   const id = newId();
-  const code = `CASE-${new Date().getFullYear()}-${id.slice(0, 6).toUpperCase()}`;
-  run(
+  const count = await one<{ n: number }>("SELECT COUNT(*)::int AS n FROM cases WHERE user_id = ?", user.id);
+  const code = `H-${new Date().getFullYear()}-${String((count?.n ?? 0) + 1).padStart(4, "0")}`;
+
+  await run(
     `INSERT INTO cases (id, user_id, code, title, subject, purpose, authorization_ref, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
@@ -48,28 +47,28 @@ export async function createCaseAction(formData: FormData): Promise<void> {
     now(),
   );
 
-  const m = await meta();
-  audit({
+  await audit({
     userId: user.id,
     actor: user.email,
     action: "case.create",
     entity: "case",
     entityId: id,
     meta: { code, title },
-    ...m,
   });
+
   revalidatePath("/cases");
-  redirect(`/cases/${id}`);
 }
 
 export async function closeCaseAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "");
-  const owned = one<{ status: string }>("SELECT status FROM cases WHERE id = ? AND user_id = ?", id, user.id);
-  if (!owned) throw new Error("Case not found");
-  const next = owned.status === "open" ? "closed" : "open";
-  run("UPDATE cases SET status = ?, closed_at = ? WHERE id = ?", next, next === "closed" ? now() : null, id);
-  audit({ userId: user.id, actor: user.email, action: "case.close", entity: "case", entityId: id, meta: { status: next } });
+  await run(
+    "UPDATE cases SET status = 'closed', closed_at = ? WHERE id = ? AND user_id = ? AND status = 'open'",
+    now(),
+    id,
+    user.id,
+  );
+  await audit({ userId: user.id, actor: user.email, action: "case.close", entity: "case", entityId: id });
   revalidatePath(`/cases/${id}`);
   revalidatePath("/cases");
 }
@@ -77,23 +76,37 @@ export async function closeCaseAction(formData: FormData): Promise<void> {
 export async function deleteCaseAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "");
-  const owned = one<{ id: string }>("SELECT id FROM cases WHERE id = ? AND user_id = ?", id, user.id);
-  if (!owned) throw new Error("Case not found");
-  run("DELETE FROM cases WHERE id = ?", id);
-  audit({ userId: user.id, actor: user.email, action: "case.delete", entity: "case", entityId: id });
+  await run("DELETE FROM cases WHERE id = ? AND user_id = ?", id, user.id);
+  await audit({ userId: user.id, actor: user.email, action: "case.delete", entity: "case", entityId: id });
   revalidatePath("/cases");
-  redirect("/cases");
 }
 
 export async function attachLookupAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const caseId = String(formData.get("caseId") ?? "");
   const lookupId = String(formData.get("lookupId") ?? "");
-  const ownedCase = one("SELECT id FROM cases WHERE id = ? AND user_id = ?", caseId, user.id);
-  const ownedLookup = one("SELECT id FROM lookups WHERE id = ? AND user_id = ?", lookupId, user.id);
+  const ownedCase = await one<{ id: string }>("SELECT id FROM cases WHERE id = ? AND user_id = ?", caseId, user.id);
+  const ownedLookup = await one<{ id: string }>(
+    "SELECT id FROM lookups WHERE id = ? AND user_id = ?",
+    lookupId,
+    user.id,
+  );
   if (!ownedCase || !ownedLookup) throw new Error("Not found");
-  run("INSERT OR IGNORE INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?)", caseId, lookupId, now());
-  audit({ userId: user.id, actor: user.email, action: "case.add_item", entity: "case", entityId: caseId, meta: { lookupId } });
+
+  await run(
+    "INSERT INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+    caseId,
+    lookupId,
+    now(),
+  );
+  await audit({
+    userId: user.id,
+    actor: user.email,
+    action: "case.add_item",
+    entity: "case",
+    entityId: caseId,
+    meta: { lookupId },
+  });
   revalidatePath(`/cases/${caseId}`);
 }
 
@@ -101,8 +114,9 @@ export async function detachLookupAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const caseId = String(formData.get("caseId") ?? "");
   const lookupId = String(formData.get("lookupId") ?? "");
-  if (!one("SELECT id FROM cases WHERE id = ? AND user_id = ?", caseId, user.id)) throw new Error("Not found");
-  run("DELETE FROM case_items WHERE case_id = ? AND lookup_id = ?", caseId, lookupId);
+  const owned = await one<{ id: string }>("SELECT id FROM cases WHERE id = ? AND user_id = ?", caseId, user.id);
+  if (!owned) throw new Error("Not found");
+  await run("DELETE FROM case_items WHERE case_id = ? AND lookup_id = ?", caseId, lookupId);
   revalidatePath(`/cases/${caseId}`);
 }
 
@@ -117,8 +131,14 @@ export async function createKeyAction(_prev: KeyState, formData: FormData): Prom
   const user = await requireUser();
   const name = String(formData.get("name") ?? "").trim();
   if (name.length < 3) return { error: "Give the key a descriptive name." };
-  const { token } = createApiKey(user.id, name);
-  audit({ userId: user.id, actor: user.email, action: "key.create", entity: "api_key", meta: { name } });
+  const { token } = await createApiKey(user.id, name);
+  await audit({
+    userId: user.id,
+    actor: user.email,
+    action: "key.create",
+    entity: "api_key",
+    meta: { name },
+  });
   revalidatePath("/settings");
   return { token };
 }
@@ -126,8 +146,8 @@ export async function createKeyAction(_prev: KeyState, formData: FormData): Prom
 export async function revokeKeyAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "");
-  if (revokeApiKey(id, user.id)) {
-    audit({ userId: user.id, actor: user.email, action: "key.revoke", entity: "api_key", entityId: id });
+  if (await revokeApiKey(id, user.id)) {
+    await audit({ userId: user.id, actor: user.email, action: "key.revoke", entity: "api_key", entityId: id });
   }
   revalidatePath("/settings");
 }
@@ -143,7 +163,7 @@ export async function addWatchAction(formData: FormData): Promise<void> {
   if (!["phone", "ip", "email", "username", "telegram"].includes(module)) throw new Error("Invalid module");
 
   const id = newId();
-  run(
+  await run(
     "INSERT INTO watchlist (id, user_id, module, target, interval_hours, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     id,
     user.id,
@@ -152,19 +172,19 @@ export async function addWatchAction(formData: FormData): Promise<void> {
     interval,
     now(),
   );
-  audit({ userId: user.id, actor: user.email, action: "watch.add", entity: "watchlist", entityId: id });
+  await audit({ userId: user.id, actor: user.email, action: "watch.add", entity: "watchlist", entityId: id });
   revalidatePath("/watchlist");
 }
 
 export async function removeWatchAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "");
-  run("DELETE FROM watchlist WHERE id = ? AND user_id = ?", id, user.id);
-  audit({ userId: user.id, actor: user.email, action: "watch.remove", entity: "watchlist", entityId: id });
+  await run("DELETE FROM watchlist WHERE id = ? AND user_id = ?", id, user.id);
+  await audit({ userId: user.id, actor: user.email, action: "watch.remove", entity: "watchlist", entityId: id });
   revalidatePath("/watchlist");
 }
 
-/* ───────────────────────────── Devices ───────────────────────────── */
+/* ───────────────────── Consent-based devices ───────────────────── */
 
 export interface DeviceState {
   token?: string;
@@ -172,145 +192,139 @@ export interface DeviceState {
 }
 
 export async function createDeviceAction(_prev: DeviceState, formData: FormData): Promise<DeviceState> {
-  const user = await requireUser();
+  const user = await requireOperator();
   const name = String(formData.get("name") ?? "").trim();
   const consentRef = String(formData.get("consent_ref") ?? "").trim();
-  if (name.length < 2) return { error: "Device name is too short." };
-  if (consentRef.length < 5) {
-    return { error: "Record the consent reference (signed form, ticket, or contract ID)." };
-  }
 
-  const token = `dv_${randomToken(24)}`;
-  const id = newId();
-  run(
-    `INSERT INTO devices (id, user_id, name, token_hash, consent_ref, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    id,
-    user.id,
-    name,
-    sha256(token),
-    consentRef,
-    now(),
-  );
-  audit({ userId: user.id, actor: user.email, action: "device.create", entity: "device", entityId: id, meta: { name } });
+  try {
+    // The token is deliberately scoped to the owner: an analyst can enrol a
+    // device for a colleague, but the notifications and history belong to the
+    // person who consented.
+    const ownerId = String(formData.get("owner_user_id") ?? "").trim() || user.id;
+    if (ownerId !== user.id && user.role !== "admin") {
+      return { error: "Only an administrator can enrol a device for another user." };
+    }
+    if (!(await userById(ownerId))) return { error: "Owner not found." };
+
+    const { token } = await registerDevice({
+      ownerUserId: ownerId,
+      name,
+      consentRef,
+      actor: user,
+    });
+    revalidatePath("/tracking");
+    return { token };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+}
+
+export async function revokeDeviceAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
+  const id = String(formData.get("id") ?? "");
+  await revokeDevice(id, user);
   revalidatePath("/tracking");
-  return { token };
 }
 
 export async function deleteDeviceAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
+  const user = await requireOperator();
   const id = String(formData.get("id") ?? "");
-  run("DELETE FROM devices WHERE id = ? AND user_id = ?", id, user.id);
-  audit({ userId: user.id, actor: user.email, action: "device.delete", entity: "device", entityId: id });
+  await deleteDevice(id, user);
   revalidatePath("/tracking");
 }
 
+/* ───────────────────────────── Geofences ───────────────────────────── */
+
 export async function createFenceAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  const deviceId = String(formData.get("device_id") ?? "");
+  const user = await requireOperator();
+  const deviceId = String(formData.get("device_id") ?? "").trim() || null;
   const name = String(formData.get("name") ?? "").trim();
   const lat = Number(formData.get("lat"));
-  const lng = Number(formData.get("lng"));
-  const radius = Math.max(20, Number(formData.get("radius_m") ?? 200));
-  if (!name) throw new Error("Fence name is required");
-  if (!one("SELECT id FROM devices WHERE id = ? AND user_id = ?", deviceId, user.id)) throw new Error("Device not found");
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error("Invalid coordinates");
+  const lon = Number(formData.get("lon"));
+  const radius = Number(formData.get("radius_m") ?? 200);
 
-  const id = newId();
-  run(
-    "INSERT INTO geofences (id, user_id, device_id, name, lat, lng, radius_m, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    id,
-    user.id,
-    deviceId,
-    name,
-    lat,
-    lng,
-    Math.round(radius),
-    now(),
-  );
-  audit({ userId: user.id, actor: user.email, action: "geofence.create", entity: "geofence", entityId: id });
+  await createGeofence({ user, name, lat, lon, radiusM: radius, deviceId });
   revalidatePath("/tracking");
 }
 
 export async function deleteFenceAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
+  const user = await requireOperator();
   const id = String(formData.get("id") ?? "");
-  run("DELETE FROM geofences WHERE id = ? AND user_id = ?", id, user.id);
-  audit({ userId: user.id, actor: user.email, action: "geofence.delete", entity: "geofence", entityId: id });
+  await deleteGeofence(id, user);
   revalidatePath("/tracking");
 }
 
 /* ───────────────────────────── Cameras ───────────────────────────── */
 
-export async function createCctvAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  const name = String(formData.get("name") ?? "").trim();
-  const endpoint = String(formData.get("endpoint") ?? "").trim();
-  const username = String(formData.get("username") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
+export interface CameraState {
+  error?: string;
+  ok?: boolean;
+}
 
-  if (!name) throw new Error("Camera name is required");
-  let parsed: URL;
+export async function createCameraAction(_prev: CameraState, formData: FormData): Promise<CameraState> {
+  const user = await requireOperator();
   try {
-    parsed = new URL(endpoint);
-  } catch {
-    throw new Error("Endpoint must be a full URL (rtsp:// or https://)");
+    await createCamera({
+      user,
+      name: String(formData.get("name") ?? ""),
+      streamUrl: String(formData.get("stream_url") ?? ""),
+      onvifHost: String(formData.get("onvif_host") ?? "") || undefined,
+      username: String(formData.get("username") ?? "") || undefined,
+      password: String(formData.get("password") ?? "") || undefined,
+      intervalSeconds: Number(formData.get("interval_seconds") ?? 300),
+      motionThreshold: formData.get("motion_threshold")
+        ? Number(formData.get("motion_threshold"))
+        : null,
+    });
+    revalidatePath("/cctv");
+    return { ok: true };
+  } catch (err) {
+    return { error: (err as Error).message };
   }
-  if (!["rtsp:", "rtsps:", "http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("Only rtsp, rtsps, http and https endpoints are supported");
-  }
+}
 
-  const id = newId();
-  run(
-    `INSERT INTO cctv_assets (id, user_id, name, protocol, endpoint_enc, username, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    id,
-    user.id,
-    name,
-    parsed.protocol.replace(":", ""),
-    encryptSecret(endpoint),
-    username || null,
-    now(),
-  );
-  audit({ userId: user.id, actor: user.email, action: "cctv.create", entity: "cctv", entityId: id });
+export async function checkCameraAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
+  const id = String(formData.get("id") ?? "");
+  await checkCamera(id, user);
   revalidatePath("/cctv");
 }
 
-export async function checkCctvAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
+export async function captureCameraAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
   const id = String(formData.get("id") ?? "");
-  const row = one<{ endpoint_enc: string; username: string | null }>(
-    "SELECT endpoint_enc, username FROM cctv_assets WHERE id = ? AND user_id = ?",
-    id,
-    user.id,
-  );
-  if (!row) throw new Error("Camera not found");
-  const { decryptSecret } = await import("@/lib/crypto");
-  const endpoint = decryptSecret(row.endpoint_enc);
-  const result = await probeCctv(endpoint, row.username);
-  run(
-    "UPDATE cctv_assets SET status = ?, last_checked_at = ? WHERE id = ?",
-    result.online ? "online" : "offline",
-    now(),
-    id,
-  );
-  audit({
-    userId: user.id,
-    actor: user.email,
-    action: "cctv.check",
-    entity: "cctv",
-    entityId: id,
-    meta: { online: result.online, detail: result.detail },
-  });
+  await captureCamera(id, user);
   revalidatePath("/cctv");
 }
 
-export async function deleteCctvAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
+export async function pollCameraAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
   const id = String(formData.get("id") ?? "");
-  run("DELETE FROM cctv_assets WHERE id = ? AND user_id = ?", id, user.id);
-  audit({ userId: user.id, actor: user.email, action: "cctv.delete", entity: "cctv", entityId: id });
+  await pollCameraEvents(id, user);
   revalidatePath("/cctv");
+}
+
+export async function enableCameraAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
+  const id = String(formData.get("id") ?? "");
+  await enableCamera(id, user);
+  revalidatePath("/cctv");
+}
+
+export async function deleteCameraAction(formData: FormData): Promise<void> {
+  const user = await requireOperator();
+  const id = String(formData.get("id") ?? "");
+  await deleteCamera(id, user);
+  revalidatePath("/cctv");
+}
+
+/* ──────────────────────────── Notifications ──────────────────────────── */
+
+export async function markNotificationsReadAction(): Promise<void> {
+  const user = await requireUser();
+  await markAllRead(user.id);
+  revalidatePath("/notifications");
+  revalidatePath("/");
 }
 
 /* ───────────────────────────── Admin ───────────────────────────── */
@@ -320,12 +334,12 @@ export async function updateUserAction(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   const role = String(formData.get("role") ?? "");
   const status = String(formData.get("status") ?? "");
-  if (!userById(id)) throw new Error("User not found");
+  if (!(await userById(id))) throw new Error("User not found");
   if (id === admin.id && status === "suspended") throw new Error("You cannot suspend your own account");
   if (!["admin", "analyst", "viewer"].includes(role)) throw new Error("Invalid role");
   if (!["active", "suspended"].includes(status)) throw new Error("Invalid status");
-  run("UPDATE users SET role = ?, status = ? WHERE id = ?", role, status, id);
-  audit({
+  await run("UPDATE users SET role = ?, status = ? WHERE id = ?", role, status, id);
+  await audit({
     userId: admin.id,
     actor: admin.email,
     action: "admin.user_update",
@@ -342,9 +356,16 @@ export async function grantCreditsAction(formData: FormData): Promise<void> {
   const amount = Math.trunc(Number(formData.get("amount") ?? 0));
   if (!Number.isFinite(amount) || amount === 0) throw new Error("Enter a non-zero amount");
   if (Math.abs(amount) > 100_000) throw new Error("Amount too large");
-  if (!userById(id)) throw new Error("User not found");
-  grant(id, amount, `admin:${admin.email}`);
-  audit({ userId: admin.id, actor: admin.email, action: "billing.grant", entity: "user", entityId: id, meta: { amount } });
+  if (!(await userById(id))) throw new Error("User not found");
+  await grant(id, amount, `admin:${admin.email}`);
+  await audit({
+    userId: admin.id,
+    actor: admin.email,
+    action: "billing.grant",
+    entity: "user",
+    entityId: id,
+    meta: { amount },
+  });
   revalidatePath("/admin");
 }
 
@@ -355,7 +376,13 @@ export async function updateProviderAction(formData: FormData): Promise<void> {
   const apiKey = String(formData.get("api_key") ?? "").trim();
   const enabled = formData.get("enabled") === "on";
   if (!["ip", "phone", "email"].includes(kind)) throw new Error("Invalid provider kind");
-  upsertProvider({ kind, name, apiKey, enabled });
-  audit({ userId: admin.id, actor: admin.email, action: "admin.provider_update", entity: "provider", meta: { kind, name, enabled } });
+  await upsertProvider({ kind, name, apiKey, enabled });
+  await audit({
+    userId: admin.id,
+    actor: admin.email,
+    action: "admin.provider_update",
+    entity: "provider",
+    meta: { kind, name, enabled },
+  });
   revalidatePath("/admin");
 }

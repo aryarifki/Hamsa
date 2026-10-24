@@ -16,7 +16,7 @@ const PRICES = [
 
 export default async function BillingPage() {
   const user = await requireUser();
-  const ledger = ledgerFor(user.id, 60);
+  const ledger = await ledgerFor(user.id, 60);
 
   return (
     <div className="space-y-5">

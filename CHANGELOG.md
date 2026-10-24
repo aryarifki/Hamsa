@@ -2,6 +2,49 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-10-22
+
+PostgreSQL, own-asset camera monitoring and consent-based geofencing.
+
+### Changed
+
+- **PostgreSQL replaces SQLite.** `lib/db.ts` now wraps a `pg` pool; `DATABASE_URL` is required. All database helpers are asynchronous (`one`, `all`, `run`, `tx`, `withClient`), and `?` placeholders are translated to `$1..$n`.
+- `lib/schema.ts` keeps the v1 shape as PostgreSQL DDL; `lib/migrations.ts` holds three reversible migrations with legacy data copy.
+- Docker image now installs `ffmpeg`, runs with PostgreSQL as a sibling service, and mounts snapshots at `/app/storage`.
+- Node 24 is the supported runtime.
+
+### Added
+
+**Camera monitor (own assets)**
+- RTSP/HTTP stream enrolment with credentials split from the URL and encrypted with AES-256-GCM.
+- ffmpeg probe, scheduled JPEG snapshots in private storage, and a pure-TS MOG2 background subtractor with configurable threshold and erosion.
+- ONVIF PullPoint client (GetCapabilities → subscription → PullMessages) with WS-Security digest.
+- Fail-closed authentication handling: a 401/403 disables the camera, notifies administrators, audits the event, and stops retries until an operator re-enables it.
+- Owner-scoped snapshot route, retention pruning, and an authenticated `/api/v1/cron/cameras` scheduler.
+- `/cctv` operator page with enrolment form, status, last error, thumbnails and recent events.
+
+**Consent-based tracking**
+- `tracked_devices`, `device_locations`, `geofences`, `geofence_events` and an append-only `notification` channel.
+- One-time UUID consent token stored as a SHA-256 digest, instant revocation, uniform 403 for invalid/revoked tokens, 60 updates/minute/token.
+- Haversine enter/exit transitions with duplicate suppression, device-scoped and org-wide fences, owner notifications and audit entries.
+- `/tracking` operator page and `/api/v1/track/location` alias.
+
+**Workspace**
+- In-app notifications page with unread badge for camera alerts and geofence transitions.
+- `npm run migrate` CLI (`up`, `down`, `status`), reversible down migrations and `tests/migrations.test.mjs` covering the full chain.
+- Authorization templates in `docs/authorization/`.
+
+### Security
+
+- Camera credentials and consent tokens are never returned unmasked; camera errors are redacted before persistence.
+- Snapshots are stored outside `public/`, path-checked against the storage root, and owner-scoped at the route.
+- `file://` camera inputs are rejected in production unless explicitly enabled for a demo.
+
+### Tests
+
+- 41 tests: unit tests plus PostgreSQL integration tests for migrations, camera enrolment/fail-closed/MOG2/ONVIF and consent/geofence HTTP semantics.
+- Tests run serialized against `TEST_DATABASE_URL` (or a local `hamsa_test`) and never read production `DATABASE_URL`.
+
 ## [1.0.0] — 2026-10-22
 
 First public release.

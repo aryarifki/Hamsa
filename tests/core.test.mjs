@@ -1,7 +1,9 @@
-import test from "node:test";
+import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 
-process.env.HAMSA_DB_PATH = ":memory:";
+process.env.NODE_ENV = "test";
+process.env.DATABASE_URL =
+  process.env.TEST_DATABASE_URL || "postgres://hamsa:hamsa@127.0.0.1:5432/hamsa_test";
 process.env.HAMSA_SECRET = "unit-test-secret-do-not-use-anywhere-else";
 process.env.HAMSA_COST_PHONE = "2";
 
@@ -12,6 +14,15 @@ const ip = await import("../lib/intel/ip.ts");
 const db = await import("../lib/db.ts");
 const users = await import("../lib/users.ts");
 const tokens = await import("../lib/tokens.ts");
+
+before(async () => {
+  await db.ensureSchema();
+  await db.resetDatabase();
+});
+
+after(async () => {
+  await db.closePool();
+});
 
 /* ── crypto ─────────────────────────────────────────────────────────── */
 
@@ -114,58 +125,61 @@ test("IPv6 loopback is classified", async () => {
 
 /* ── users, ledger, billing ─────────────────────────────────────────── */
 
-test("credits are debited atomically and never overdrawn", () => {
-  const user = users.createUser({
+test("credits are debited atomically and never overdrawn", async () => {
+  const user = await users.createUser({
     email: "analyst@test.local",
     name: "Test Analyst",
     passwordHash: crypto.hashPassword("a-long-test-password"),
     credits: 0,
   });
 
-  assert.equal(tokens.balanceOf(user.id), 0);
-  tokens.grant(user.id, 5, "test:grant");
-  assert.equal(tokens.balanceOf(user.id), 5);
+  assert.equal(await tokens.balanceOf(user.id), 0);
+  await tokens.grant(user.id, 5, "test:grant");
+  assert.equal(await tokens.balanceOf(user.id), 5);
 
-  assert.equal(tokens.charge(user.id, 2, "lookup:phone"), 3);
-  assert.throws(() => tokens.charge(user.id, 99, "lookup:phone"), tokens.InsufficientCreditsError);
-  assert.equal(tokens.balanceOf(user.id), 3, "failed charge must not move the balance");
+  assert.equal(await tokens.charge(user.id, 2, "lookup:phone"), 3);
+  await assert.rejects(
+    () => tokens.charge(user.id, 99, "lookup:phone"),
+    tokens.InsufficientCreditsError,
+  );
+  assert.equal(await tokens.balanceOf(user.id), 3, "failed charge must not move the balance");
 
-  tokens.refund(user.id, 2, "provider-failure");
-  assert.equal(tokens.balanceOf(user.id), 5);
+  await tokens.refund(user.id, 2, "provider-failure");
+  assert.equal(await tokens.balanceOf(user.id), 5);
 });
 
-test("ledger records every movement", () => {
-  const user = users.createUser({
+test("ledger records every movement", async () => {
+  const user = await users.createUser({
     email: "ledger@test.local",
     name: "Ledger",
     passwordHash: crypto.hashPassword("a-long-test-password"),
     credits: 10,
   });
-  tokens.charge(user.id, 2, "lookup:ip");
-  const entries = tokens.ledgerFor(user.id);
+  await tokens.charge(user.id, 2, "lookup:ip");
+  const entries = await tokens.ledgerFor(user.id);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].delta, -2);
   assert.equal(entries[0].balance_after, 8);
 });
 
-test("credential verification is case-insensitive on email", () => {
-  const user = users.createUser({
+test("credential verification is case-insensitive on email", async () => {
+  const user = await users.createUser({
     email: "MiXeD@Case.Local",
     name: "Mixed",
     passwordHash: crypto.hashPassword("a-long-test-password"),
   });
-  assert.ok(users.checkCredentials("mixed@case.local", "a-long-test-password"));
-  assert.equal(users.checkCredentials("mixed@case.local", "nope"), null);
+  assert.ok(await users.checkCredentials("mixed@case.local", "a-long-test-password"));
+  assert.equal(await users.checkCredentials("mixed@case.local", "nope"), null);
 });
 
-test("suspended accounts cannot authenticate", () => {
-  const user = users.createUser({
+test("suspended accounts cannot authenticate", async () => {
+  const user = await users.createUser({
     email: "suspended@test.local",
     name: "Suspended",
     passwordHash: crypto.hashPassword("a-long-test-password"),
   });
-  db.run("UPDATE users SET status = 'suspended' WHERE id = ?", user.id);
-  assert.equal(users.checkCredentials("suspended@test.local", "a-long-test-password"), null);
+  await db.run("UPDATE users SET status = 'suspended' WHERE id = ?", user.id);
+  assert.equal(await users.checkCredentials("suspended@test.local", "a-long-test-password"), null);
 });
 
 /* ── pricing ────────────────────────────────────────────────────────── */

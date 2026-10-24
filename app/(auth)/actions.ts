@@ -44,14 +44,14 @@ export async function loginAction(_prev: AuthState, formData: FormData): Promise
     return { error: "Enter a valid email and password." };
   }
 
-  const user = checkCredentials(email, password);
+  const user = await checkCredentials(email, password);
   if (!user) {
-    audit({ action: "auth.login_failed", actor: email, ip, userAgent: ua, meta: { email } });
+    await audit({ action: "auth.login_failed", actor: email, ip, userAgent: ua, meta: { email } });
     return { error: "Invalid credentials." };
   }
 
   await createSession(user.id, ip, ua);
-  audit({ userId: user.id, actor: user.email, action: "auth.login", ip, userAgent: ua });
+  await audit({ userId: user.id, actor: user.email, action: "auth.login", ip, userAgent: ua });
   redirect("/");
 }
 
@@ -69,16 +69,16 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
   if (name.length < 2) return { error: "Name must be at least 2 characters." };
   if (password.length < 12) return { error: "Use a password of at least 12 characters." };
   if (!accept) return { error: "You must accept the acceptable-use terms." };
-  if (one("SELECT id FROM users WHERE email = ?", email)) {
+  if (await one("SELECT id FROM users WHERE email = ?", email)) {
     return { error: "An account with that email already exists." };
   }
 
   const credits = Number(process.env.HAMSA_SIGNUP_CREDITS ?? 25);
-  const user = createUser({ email, name, passwordHash: hashPassword(password), credits: 0 });
-  if (credits > 0) grant(user.id, credits, "signup:bonus");
+  const user = await createUser({ email, name, passwordHash: hashPassword(password), credits: 0 });
+  if (credits > 0) await grant(user.id, credits, "signup:bonus");
 
   await createSession(user.id, ip, ua);
-  audit({
+  await audit({
     userId: user.id,
     actor: user.email,
     action: "auth.register",

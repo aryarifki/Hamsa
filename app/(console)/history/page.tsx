@@ -16,7 +16,7 @@ const MODULE_ICON = {
 
 export default async function HistoryPage() {
   const user = await requireUser();
-  const rows = historyFor(user.id, 200);
+  const rows = await historyFor(user.id, 200);
 
   return (
     <div className="space-y-5">

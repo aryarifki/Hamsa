@@ -7,20 +7,31 @@
  * Creates (idempotently):
  *   analyst@hamsa.local / hamsa-demo-passphrase
  *   two cases, three watchlist entries, and a handful of synthetic lookups.
+ *
+ * Requires DATABASE_URL. The schema is created/applied first, so this is safe
+ * on an empty database.
  */
-import { newId, now, one, run } from "../lib/db.ts";
+import { closePool, ensureSchema, newId, now, run } from "../lib/db.ts";
 import { hashPassword } from "../lib/crypto.ts";
 import { createUser, userByEmail } from "../lib/users.ts";
 
 const EMAIL = "analyst@hamsa.local";
 const PASSWORD = "hamsa-demo-passphrase";
 
-if (userByEmail(EMAIL)) {
+if (!process.env.DATABASE_URL) {
+  console.error("[seed] DATABASE_URL is not set (postgres://user:pass@host:5432/hamsa)");
+  process.exit(1);
+}
+
+await ensureSchema();
+
+if (await userByEmail(EMAIL)) {
   console.log(`[seed] ${EMAIL} already exists — nothing to do.`);
+  await closePool();
   process.exit(0);
 }
 
-const analyst = createUser({
+const analyst = await createUser({
   email: EMAIL,
   name: "Demo Analyst",
   passwordHash: hashPassword(PASSWORD),
@@ -28,8 +39,8 @@ const analyst = createUser({
   credits: 0,
 });
 
-run("UPDATE users SET credits = ? WHERE id = ?", 250, analyst.id);
-run(
+await run("UPDATE users SET credits = ? WHERE id = ?", 250, analyst.id);
+await run(
   `INSERT INTO ledger (id, user_id, delta, balance_after, reason, created_at)
    VALUES (?, ?, ?, ?, 'seed:demo-balance', ?)`,
   newId(),
@@ -60,7 +71,7 @@ const caseIds = [];
 for (const c of cases) {
   const id = newId();
   caseIds.push(id);
-  run(
+  await run(
     `INSERT INTO cases (id, user_id, code, title, subject, purpose, authorization_ref, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
@@ -82,7 +93,7 @@ const demoLookups = [
 
 for (const item of demoLookups) {
   const id = newId();
-  run(
+  await run(
     `INSERT INTO lookups (id, user_id, module, target, status, cost, provider, result, created_at, duration_ms)
      VALUES (?, ?, ?, ?, 'ok', 2, 'seed', ?, ?, 42)`,
     id,
@@ -99,7 +110,7 @@ for (const item of demoLookups) {
     }),
     now(),
   );
-  run("INSERT INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?)", caseIds[0], id, now());
+  await run("INSERT INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?)", caseIds[0], id, now());
 }
 
 for (const [module, target, hours] of [
@@ -107,7 +118,7 @@ for (const [module, target, hours] of [
   ["ip", "198.51.100.7", 12],
   ["email", "watch@example.com", 72],
 ]) {
-  run(
+  await run(
     `INSERT INTO watchlist (id, user_id, module, target, interval_hours, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
     newId(),
@@ -126,4 +137,5 @@ console.log(`[seed] ready
   credits:  250
 
 Change or delete this account before exposing the deployment.`);
-void one;
+
+await closePool();

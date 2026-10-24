@@ -20,13 +20,20 @@ export type AuditAction =
   | "watch.add"
   | "watch.remove"
   | "device.create"
-  | "device.ping"
+  | "device.consent"
+  | "device.revoke"
   | "device.delete"
   | "geofence.create"
   | "geofence.delete"
-  | "cctv.create"
-  | "cctv.check"
-  | "cctv.delete"
+  | "geofence.enter"
+  | "geofence.exit"
+  | "camera.create"
+  | "camera.update"
+  | "camera.check"
+  | "camera.snapshot"
+  | "camera.event"
+  | "camera.disabled"
+  | "camera.delete"
   | "telegram.sync"
   | "export.generate";
 
@@ -44,10 +51,14 @@ export interface AuditInput {
 /**
  * Append-only audit trail. Every state-changing action in Hamsa goes through
  * here — it is the backbone of the "authorized use" story this product sells.
+ *
+ * Never throws into the request path: a failed audit write is logged loudly and
+ * the caller continues, because losing the audit row is bad but dropping a
+ * legitimate investigation result is worse.
  */
-export function audit(input: AuditInput): void {
+export async function audit(input: AuditInput): Promise<void> {
   try {
-    run(
+    await run(
       `INSERT INTO audit_log (id, user_id, actor, action, entity, entity_id, meta, ip, user_agent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       newId(),
@@ -62,7 +73,6 @@ export function audit(input: AuditInput): void {
       now(),
     );
   } catch (err) {
-    // Auditing must never break the request path, but it must be visible.
     console.error("[audit] failed to write entry", err);
   }
 }

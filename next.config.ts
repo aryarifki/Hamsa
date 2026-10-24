@@ -4,7 +4,6 @@ const config: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["node:sqlite"],
   experimental: {
     serverActions: { bodySizeLimit: "4mb" },
   },

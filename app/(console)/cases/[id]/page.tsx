@@ -22,10 +22,10 @@ interface CaseDetail {
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const record = one<CaseDetail>("SELECT * FROM cases WHERE id = ? AND user_id = ?", id, user.id);
+  const record = await one<CaseDetail>("SELECT * FROM cases WHERE id = ? AND user_id = ?", id, user.id);
   if (!record) notFound();
 
-  const items = all<{
+  const items = await all<{
     lookup_id: string;
     module: string;
     target: string;
@@ -39,7 +39,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     id,
   );
 
-  const attachable = all<{ id: string; module: string; target: string; created_at: string }>(
+  const attachable = await all<{ id: string; module: string; target: string; created_at: string }>(
     `SELECT id, module, target, created_at FROM lookups
      WHERE user_id = ? AND id NOT IN (SELECT lookup_id FROM case_items WHERE case_id = ?)
      ORDER BY created_at DESC LIMIT 30`,

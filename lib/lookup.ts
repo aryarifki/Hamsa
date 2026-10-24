@@ -69,16 +69,20 @@ export async function runLookup(input: LookupInput) {
   if (target.length > 320) throw new LookupError(400, "Target is too long");
 
   if (input.caseId) {
-    const owned = one<{ id: string }>("SELECT id FROM cases WHERE id = ? AND user_id = ?", input.caseId, input.user.id);
+    const owned = await one<{ id: string }>(
+      "SELECT id FROM cases WHERE id = ? AND user_id = ?",
+      input.caseId,
+      input.user.id,
+    );
     if (!owned) throw new LookupError(404, "Case not found");
   }
 
   const cost = costOf(input.module);
-  const balance = charge(input.user.id, cost, `lookup:${input.module}`, "lookup");
+  const balance = await charge(input.user.id, cost, `lookup:${input.module}`, "lookup");
   const id = newId();
   const startedAt = Date.now();
 
-  run(
+  await run(
     `INSERT INTO lookups (id, user_id, module, target, status, cost, created_at)
      VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
     id,
@@ -92,7 +96,7 @@ export async function runLookup(input: LookupInput) {
   try {
     const result = await dispatch(input);
     const duration = Date.now() - startedAt;
-    run(
+    await run(
       "UPDATE lookups SET status = 'ok', provider = ?, result = ?, duration_ms = ? WHERE id = ?",
       result.sources.filter((s) => s.kind === "provider" || s.kind === "public-api").map((s) => s.name).join(", ") || null,
       JSON.stringify(result),
@@ -101,15 +105,15 @@ export async function runLookup(input: LookupInput) {
     );
 
     if (input.caseId) {
-      run(
-        "INSERT OR IGNORE INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?)",
+      await run(
+        "INSERT INTO case_items (case_id, lookup_id, added_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
         input.caseId,
         id,
         now(),
       );
     }
 
-    audit({
+    await audit({
       userId: input.user.id,
       actor: input.user.email,
       action: "lookup.run",
@@ -123,9 +127,14 @@ export async function runLookup(input: LookupInput) {
     return { id, module: input.module, target, cost, balance, durationMs: duration, result };
   } catch (err) {
     const message = (err as Error).message.slice(0, 500);
-    run("UPDATE lookups SET status = 'error', error = ?, duration_ms = ? WHERE id = ?", message, Date.now() - startedAt, id);
-    refund(input.user.id, cost, "provider-failure", id);
-    audit({
+    await run(
+      "UPDATE lookups SET status = 'error', error = ?, duration_ms = ? WHERE id = ?",
+      message,
+      Date.now() - startedAt,
+      id,
+    );
+    await refund(input.user.id, cost, "provider-failure", id);
+    await audit({
       userId: input.user.id,
       actor: input.user.email,
       action: "lookup.denied",
@@ -139,7 +148,7 @@ export async function runLookup(input: LookupInput) {
   }
 }
 
-export function historyFor(userId: string, limit = 100): LookupRecord[] {
+export async function historyFor(userId: string, limit = 100): Promise<LookupRecord[]> {
   return all<LookupRecord>(
     `SELECT id, user_id, module, target, status, cost, provider, result, error, created_at, duration_ms
      FROM lookups WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
@@ -148,7 +157,7 @@ export function historyFor(userId: string, limit = 100): LookupRecord[] {
   );
 }
 
-export function lookupById(id: string, userId: string): LookupRecord | undefined {
+export async function lookupById(id: string, userId: string): Promise<LookupRecord | undefined> {
   return one<LookupRecord>("SELECT * FROM lookups WHERE id = ? AND user_id = ?", id, userId);
 }
 

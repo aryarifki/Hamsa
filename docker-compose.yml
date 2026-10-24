@@ -1,33 +1,58 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: hamsa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hamsa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hamsa
+    volumes:
+      - hamsa-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hamsa -d hamsa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+
   hamsa:
     build: .
-    image: hamsa:1.0.0
+    image: hamsa:1.1.0
     container_name: hamsa
     restart: unless-stopped
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      HAMSA_DB_PATH: /app/data/hamsa.db
+      DATABASE_URL: postgres://hamsa:${POSTGRES_PASSWORD}@postgres:5432/hamsa
+      HAMSA_STORAGE_DIR: /app/storage
     ports:
       # Bind to loopback: put a TLS-terminating reverse proxy in front.
       - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      - hamsa-data:/app/data
+      - hamsa-storage:/app/storage
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 4s
       retries: 3
-      start_period: 15s
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     read_only: true
     tmpfs:
-      - /tmp:size=32m,mode=1777
+      - /tmp:size=64m,mode=1777
 
 volumes:
-  hamsa-data:
+  hamsa-pg:
+    driver: local
+  hamsa-storage:
     driver: local

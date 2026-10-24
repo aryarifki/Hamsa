@@ -1,19 +1,20 @@
 # API reference
 
-Base URL: `https://your-host`. All responses are JSON unless noted. `Cache-Control: no-store` is set everywhere.
+Base URL: `https://your-host`. All responses are JSON unless noted. `Cache-Control: no-store` is set everywhere except snapshots (private, short cache).
 
 ## Authentication
 
-Two mechanisms, both accepted by the lookup and export endpoints:
+Three mechanisms, each scoped to its own surface:
 
 1. **Session cookie** — `hamsa_session`, issued by the login Server Action. httpOnly, SameSite=Lax, 12-hour TTL, revoked server-side on logout.
-2. **API key** — `Authorization: Bearer hk_<prefix>_<secret>`. Created in **Settings → API keys**; the plaintext is shown once and stored as a SHA-256 digest.
+2. **API key** — `Authorization: Bearer hk_<prefix>_<secret>`. Created in **Settings → API keys**; the plaintext is shown once and stored as a SHA-256 digest. Accepted by the lookup, export and snapshot endpoints.
+3. **Consent token** — `Authorization: Bearer <uuid>`. Minted once when a device is enrolled in **Tracking**; only its SHA-256 digest is stored. Accepted by the device ingest endpoint only.
 
 ```http
 Authorization: Bearer hk_ab12cd34_Xy9...
 ```
 
-Missing or invalid credentials return `401 {"error":"Authentication required"}`.
+Missing or invalid user credentials return `401 {"error":"Authentication required"}`. A missing, unknown or revoked device token always returns `403 {"error":"Forbidden"}` — the ingest endpoint never confirms whether a device exists.
 
 ## Rate limits
 
@@ -21,8 +22,9 @@ Missing or invalid credentials return `401 {"error":"Authentication required"}`.
 | --- | --- |
 | Login / register | `HAMSA_AUTH_RATE_LIMIT` per IP per minute (default 10) |
 | Lookups | 60 per minute per user or API key |
-| Device pings | 120 per minute per device |
+| Device location updates | 60 per minute per token |
 | Watchlist cron | shared `CRON_SECRET` |
+| Camera cron | shared `CRON_SECRET` |
 
 Exceeding a limit returns `429` with `retryAfter` (seconds) where available.
 
@@ -114,25 +116,53 @@ Print-to-PDF is a page, not an API: `GET /history/<id>/print`.
 
 ## `POST /api/v1/device/ping`
 
-Consent-gated position ingest.
+Consent-gated position ingest. `/api/v1/track/location` is an alias of the same handler.
 
 ```http
-Authorization: Bearer dv_<token>
+Authorization: Bearer <consent-token>
 Content-Type: application/json
 
-{ "lat": -6.2005, "lng": 106.8005, "accuracy": 8, "battery": 77 }
+{ "lat": -6.2005, "lon": 106.8005, "accuracy": 8, "battery": 77 }
 ```
+
+`lng` is accepted as an alias for `lon` (older clients). `ts` may be an ISO-8601 timestamp; otherwise the server time is used.
 
 **Response `200`**
 
 ```json
 {
   "receivedAt": "2026-10-22T07:12:23.659Z",
-  "fences": [{ "id": "5cbc…", "name": "HQ", "inside": true, "distanceMeters": 78 }]
+  "device": { "id": "9f0a…", "name": "Field kit" },
+  "fences": [
+    { "id": "5cbc…", "name": "HQ", "inside": true, "distanceMeters": 78 }
+  ],
+  "transitions": [
+    { "geofenceId": "5cbc…", "name": "HQ", "type": "enter", "distanceMeters": 78 }
+  ]
 }
 ```
 
-`401` for unknown/revoked tokens, `400` for out-of-range coordinates, `429` above 120 pings/minute.
+`transitions` is empty when the update did not cross a boundary. The first position inside a fence produces `enter`; an inside-to-outside update produces `exit`; repeats are suppressed.
+
+**Errors**
+
+| Status | Body | Cause |
+| --- | --- | --- |
+| `400` | `{"error":"Invalid location payload"}` | Missing/out-of-range `lat`/`lon`, bad timestamp |
+| `403` | `{"error":"Forbidden"}` | Missing, unknown or revoked token (no detail, by design) |
+| `429` | `{"error":"Too many location updates","retryAfter":12}` | More than 60 updates/minute for the token |
+
+---
+
+## `GET /api/v1/cctv/snapshot/[id]`
+
+Returns the JPEG for one snapshot. Requires a session cookie or an API key; the caller must own the camera or be an administrator. The database path is validated against `HAMSA_STORAGE_DIR` before the file is read.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | `image/jpeg`, `Cache-Control: private, max-age=60` |
+| `401` | No user authentication |
+| `404` | Snapshot does not exist, caller does not own it, or the file is missing |
 
 ---
 
@@ -157,6 +187,32 @@ x-cron-secret: $CRON_SECRET
 
 ---
 
+## `POST /api/v1/cron/cameras`
+
+Runs one bounded camera pass, then prunes snapshots older than `HAMSA_SNAPSHOT_RETENTION_DAYS`.
+
+```http
+x-cron-secret: $CRON_SECRET
+```
+
+```json
+{
+  "checked": 2,
+  "captured": 2,
+  "motion": 1,
+  "onvifEvents": 0,
+  "errors": 0,
+  "pruned": 4,
+  "results": [
+    { "id": "0f2c…", "name": "Gate", "captured": true, "motion": false }
+  ]
+}
+```
+
+Cameras in `disabled_auth` or `needs_config` are skipped until an operator fixes and re-enables them. Only cameras whose interval has elapsed are selected, up to `HAMSA_CAMERA_BATCH` (max 25).
+
+---
+
 ## `GET /api/health`
 
 Unauthenticated liveness probe. Returns `{"status":"ok","database":"reachable","time":"…"}` or `503`.
@@ -172,8 +228,9 @@ Unauthenticated liveness probe. Returns `{"status":"ok","database":"reachable","
 | `/cases`, `/cases/[id]` | Dossiers and evidence |
 | `/history`, `/history/[id]`, `/history/[id]/print` | Records and exports |
 | `/watchlist` | Scheduled monitoring |
-| `/tracking` | Devices and geofences |
-| `/cctv` | Own-asset camera register |
+| `/tracking` | Consent devices, tokens and geofences |
+| `/cctv` | Own-asset camera monitor |
+| `/notifications` | Camera alerts and geofence transitions |
 | `/billing` | Ledger and price list |
 | `/settings` | Password, API keys, sessions |
 | `/admin` | Operators, providers, audit trail |

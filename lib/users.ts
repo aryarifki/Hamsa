@@ -8,6 +8,9 @@ import { verifyPassword } from "./crypto";
 
 export type Role = "admin" | "analyst" | "viewer";
 
+/** The requested "researcher" role maps onto Hamsa's existing `analyst`. */
+export const isOperator = (role: string): boolean => role === "admin" || role === "analyst";
+
 export interface User {
   id: string;
   email: string;
@@ -21,40 +24,41 @@ export interface User {
 
 const USER_COLUMNS = "id, email, name, role, status, credits, created_at, last_login_at";
 
-export function userByEmail(email: string): (User & { password_hash: string }) | undefined {
+export async function userByEmail(email: string): Promise<(User & { password_hash: string }) | undefined> {
   return one<User & { password_hash: string }>(
     `SELECT ${USER_COLUMNS}, password_hash FROM users WHERE email = ?`,
     email.trim().toLowerCase(),
   );
 }
 
-export function userById(id: string): User | undefined {
+export async function userById(id: string): Promise<User | undefined> {
   return one<User>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, id);
 }
 
 /** Verifies credentials. Always performs a hash comparison to blunt user-enumeration timing. */
-export function checkCredentials(email: string, password: string): User | null {
-  const row = userByEmail(email);
+export async function checkCredentials(email: string, password: string): Promise<User | null> {
+  const row = await userByEmail(email);
   if (!row) {
     verifyPassword(password, "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAA");
     return null;
   }
   if (!verifyPassword(password, row.password_hash)) return null;
   if (row.status !== "active") return null;
-  run("UPDATE users SET last_login_at = ? WHERE id = ?", now(), row.id);
+  const stamp = now();
+  await run("UPDATE users SET last_login_at = ? WHERE id = ?", stamp, row.id);
   const { password_hash: _ignored, ...user } = row;
-  return user;
+  return { ...user, last_login_at: stamp };
 }
 
-export function createUser(input: {
+export async function createUser(input: {
   email: string;
   name: string;
   passwordHash: string;
   role?: Role;
   credits?: number;
-}): User {
+}): Promise<User> {
   const id = newId();
-  run(
+  await run(
     "INSERT INTO users (id, email, name, password_hash, role, credits, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     id,
     input.email.trim().toLowerCase(),
@@ -64,7 +68,7 @@ export function createUser(input: {
     input.credits ?? 0,
     now(),
   );
-  return userById(id)!;
+  return (await userById(id))!;
 }
 
 export const isAdmin = (user: User | null): boolean => user?.role === "admin";

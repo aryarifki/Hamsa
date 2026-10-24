@@ -6,7 +6,7 @@ import { currentUser } from "@/lib/auth";
 export async function POST(req: Request) {
   const user = await currentUser();
   if (user) {
-    audit({
+    await audit({
       userId: user.id,
       actor: user.email,
       action: "auth.logout",

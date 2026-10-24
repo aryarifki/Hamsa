@@ -57,17 +57,17 @@ export async function authenticate(req: Request | NextRequest): Promise<AuthCont
   if (header?.startsWith("Bearer ")) {
     const token = header.slice(7).trim();
     if (token.startsWith("hk_")) {
-      const row = one<{ id: string; user_id: string; revoked_at: string | null }>(
+      const row = await one<{ id: string; user_id: string; revoked_at: string | null }>(
         "SELECT id, user_id, revoked_at FROM api_keys WHERE key_hash = ?",
         sha256(token),
       );
       if (!row || row.revoked_at) return null;
-      const user = one<User>(
+      const user = await one<User>(
         "SELECT id, email, name, role, status, credits, created_at, last_login_at FROM users WHERE id = ?",
         row.user_id,
       );
       if (!user || user.status !== "active") return null;
-      run("UPDATE api_keys SET last_used_at = ? WHERE id = ?", now(), row.id);
+      await run("UPDATE api_keys SET last_used_at = ? WHERE id = ?", now(), row.id);
       return { user, via: "api_key", apiKeyId: row.id };
     }
     return null;

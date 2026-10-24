@@ -13,6 +13,7 @@ coverage/
 *.db-wal
 *.db-shm
 data/
+storage/
 
 .DS_Store
 *.pem

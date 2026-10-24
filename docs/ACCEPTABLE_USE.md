@@ -25,11 +25,11 @@ If you cannot name the basis in one sentence, you do not have one.
 | --- | --- |
 | Case authorization reference | Required (min. 3 chars) to open a case; displayed on the case and in exports |
 | Lawful purpose | Required (min. 10 chars); stored with the dossier |
-| Consent reference for tracking | Required to enrol a device; audited |
-| Audit trail | Every login, lookup, export, grant, key creation, device ping and admin action |
+| Consent reference for tracking | Required to enrol a device; audited; the consent token can be revoked at any time |
+| Audit trail | Every login, lookup, export, grant, key creation, device registration/consent/revocation, geofence create/enter/exit, camera lifecycle and admin action |
 | Credit ledger | Every debit/credit attributable to an operator |
 | Provider keys | Never shipped; the operator supplies their own and is bound by that provider's terms |
-| Rate limits | Per-IP on auth, per-user on lookups, per-device on pings |
+| Rate limits | Per-IP on auth, per-user on lookups, per-token on device updates (60/min) |
 
 ## Prohibited uses
 
@@ -37,7 +37,7 @@ Do **not** use Hamsa to:
 
 1. **Stalk, harass, threaten or intimidate** any person.
 2. **Locate a person from a phone number.** The product has no such capability; do not add one to a deployment you operate.
-3. **Access cameras you do not own or have not been contracted to monitor.** The camera module is an inventory register, not a discovery tool.
+3. **Access cameras you do not own or have not been contracted to monitor.** The camera module is a monitor for streams you enrol yourself, not a discovery tool.
 4. **Bypass authentication** on any third-party system, or use harvested credentials to access an account.
 5. **Scrape private channels or closed groups.** The Telegram module reads only the public `t.me/s/` preview.
 6. **Build a profile of a minor**, except where the investigation is specifically about their safety and is authorized by a guardian or authority.
@@ -64,9 +64,11 @@ Set a retention period before you collect, not after. A practical default:
 - Active case: kept for the engagement plus any statutory period.
 - Closed case: reviewed at 90 days; retained only if a legal hold applies.
 - Audit log: retained for the period your regulator or insurer requires (often 1–3 years).
+- Camera snapshots: the default pruning window is 14 days (`HAMSA_SNAPSHOT_RETENTION_DAYS`); set it to the shortest period the engagement needs.
+- Location history: retained with the device; revoking a token stops collection but does not erase `device_locations` — delete the device when the basis ends.
 - Backups: inherit the same schedule; deletion must reach them too.
 
-To delete an investigation, delete the case (which cascades to `case_items`), then delete the associated lookups and their exports. Audit entries are retained by design; if your policy requires removing the actor identifier, replace it with a case code rather than deleting the row.
+To delete an investigation, delete the case (which cascades to `case_items`), then delete the associated lookups and their exports. Delete tracked devices (cascading to locations and geofence events) and camera rows (cascading to snapshots/events), then remove the matching `storage/cameras/<id>/` directories. Audit entries are retained by design; if your policy requires removing the actor identifier, replace it with a case code rather than deleting the row.
 
 ## Data subject requests
 
@@ -84,6 +86,7 @@ If you suspect misuse of your deployment:
 2. Identify the actor from `audit_log` and `sessions`.
 3. Revoke their sessions and API keys from **Admin → Operators** and **Settings → API keys**.
 4. Rotate `HAMSA_SECRET` if provider credentials or camera passwords may have been exposed, then re-enter them.
+5. Revoke every consent device token and disable the camera schedules that belonged to the engagement.
 5. Notify whoever your policy requires.
 
 ## Operator declaration

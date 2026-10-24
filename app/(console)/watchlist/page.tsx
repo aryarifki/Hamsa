@@ -20,9 +20,9 @@ interface Watch {
 
 export default async function WatchlistPage() {
   const user = await requireUser();
-  const rows = all<Watch>(
+  const rows = await all<Watch>(
     `SELECT w.*,
-            (SELECT json_extract(w.last_result, '$.lookupId')) AS latest_lookup
+            (SELECT (w.last_result::jsonb)->>'lookupId') AS latest_lookup
      FROM watchlist w WHERE w.user_id = ? ORDER BY w.created_at DESC`,
     user.id,
   );
@@ -77,7 +77,7 @@ export default async function WatchlistPage() {
                   <th>Module</th>
                   <th>Target</th>
                   <th>Interval</th>
-                  <th>Last run</th>
+                  <th>Last await run</th>
                   <th>Status</th>
                   <th />
                 </tr>

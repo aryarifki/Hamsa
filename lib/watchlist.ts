@@ -27,16 +27,16 @@ export interface WatchRunSummary {
 /**
  * Executes every watchlist entry whose interval has elapsed.
  *
- * Deliberately synchronous and bounded: a cron request never tries to drain an
- * unbounded queue. Credits are charged to the entry's owner, and an owner who
- * cannot pay is skipped rather than allowed to run up a negative balance.
+ * Deliberately bounded: a cron request never tries to drain an unbounded queue.
+ * Credits are charged to the entry's owner, and an owner who cannot pay is
+ * skipped rather than allowed to run up a negative balance.
  */
 export async function runDueWatchlist(maxItems = 10): Promise<WatchRunSummary> {
-  const due = all<WatchRow>(
+  const due = await all<WatchRow>(
     `SELECT * FROM watchlist
      WHERE active = 1
-       AND (last_run_at IS NULL OR datetime(last_run_at, '+' || interval_hours || ' hours') <= datetime('now'))
-     ORDER BY COALESCE(last_run_at, '1970-01-01') ASC
+       AND (last_run_at IS NULL OR last_run_at + (interval_hours * INTERVAL '1 hour') <= now())
+     ORDER BY COALESCE(last_run_at, TIMESTAMPTZ '1970-01-01') ASC
      LIMIT ?`,
     maxItems,
   );
@@ -44,10 +44,10 @@ export async function runDueWatchlist(maxItems = 10): Promise<WatchRunSummary> {
   const summary: WatchRunSummary = { checked: 0, skipped: 0, errors: 0, results: [] };
 
   for (const entry of due) {
-    const owner = userById(entry.user_id);
+    const owner = await userById(entry.user_id);
     if (!owner || owner.credits < costOf(entry.module)) {
       summary.skipped += 1;
-      run(
+      await run(
         "UPDATE watchlist SET last_run_at = ?, last_status = 'skipped:credits' WHERE id = ?",
         now(),
         entry.id,
@@ -65,7 +65,7 @@ export async function runDueWatchlist(maxItems = 10): Promise<WatchRunSummary> {
         userAgent: "hamsa-watchlist/1.0",
       });
       summary.checked += 1;
-      run(
+      await run(
         "UPDATE watchlist SET last_run_at = ?, last_status = 'ok', last_result = ? WHERE id = ?",
         now(),
         JSON.stringify({
@@ -80,7 +80,7 @@ export async function runDueWatchlist(maxItems = 10): Promise<WatchRunSummary> {
       summary.errors += 1;
       const status =
         err instanceof InsufficientCreditsError ? "skipped:credits" : `error:${(err as Error).message.slice(0, 120)}`;
-      run("UPDATE watchlist SET last_run_at = ?, last_status = ? WHERE id = ?", now(), status, entry.id);
+      await run("UPDATE watchlist SET last_run_at = ?, last_status = ? WHERE id = ?", now(), status, entry.id);
       summary.results.push({ id: entry.id, target: entry.target, status });
     }
   }

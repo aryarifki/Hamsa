@@ -18,13 +18,13 @@ export interface ApiKeyRow {
   revoked_at: string | null;
 }
 
-export function createApiKey(userId: string, name: string): { token: string; row: ApiKeyRow } {
+export async function createApiKey(userId: string, name: string): Promise<{ token: string; row: ApiKeyRow }> {
   const secret = randomToken(24);
   const prefix = `hk_${randomToken(4)}`;
   const token = `${prefix}_${secret}`;
   const hash = createHash("sha256").update(token).digest("hex");
   const id = newId();
-  run(
+  await run(
     `INSERT INTO api_keys (id, user_id, name, prefix, key_hash, scopes, created_at)
      VALUES (?, ?, ?, ?, ?, 'lookup', ?)`,
     id,
@@ -34,17 +34,17 @@ export function createApiKey(userId: string, name: string): { token: string; row
     hash,
     now(),
   );
-  return { token, row: apiKeyById(id)! };
+  return { token, row: (await apiKeyById(id))! };
 }
 
-export function apiKeyById(id: string): ApiKeyRow | undefined {
+export async function apiKeyById(id: string): Promise<ApiKeyRow | undefined> {
   return one<ApiKeyRow>(
     "SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at FROM api_keys WHERE id = ?",
     id,
   );
 }
 
-export function listApiKeys(userId: string): ApiKeyRow[] {
+export async function listApiKeys(userId: string): Promise<ApiKeyRow[]> {
   return all<ApiKeyRow>(
     `SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at
      FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`,
@@ -52,8 +52,14 @@ export function listApiKeys(userId: string): ApiKeyRow[] {
   );
 }
 
-export function revokeApiKey(id: string, userId: string): boolean {
-  return run("UPDATE api_keys SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL", now(), id, userId).changes > 0;
+export async function revokeApiKey(id: string, userId: string): Promise<boolean> {
+  const res = await run(
+    "UPDATE api_keys SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+    now(),
+    id,
+    userId,
+  );
+  return res.changes > 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,15 +81,24 @@ export const PROVIDER_CATALOG = [
   { kind: "email", name: "Have I Been Pwned", env: "HIBP_API_KEY", docs: "https://haveibeenpwned.com/API/Key" },
 ] as const;
 
-export function listProviders(): ProviderRow[] {
+export async function listProviders(): Promise<ProviderRow[]> {
   return all<ProviderRow>("SELECT * FROM providers ORDER BY kind, name");
 }
 
-export function upsertProvider(input: { kind: string; name: string; apiKey: string; enabled: boolean }): void {
-  const existing = one<{ id: string }>("SELECT id FROM providers WHERE kind = ? AND name = ?", input.kind, input.name);
+export async function upsertProvider(input: {
+  kind: string;
+  name: string;
+  apiKey: string;
+  enabled: boolean;
+}): Promise<void> {
+  const existing = await one<{ id: string }>(
+    "SELECT id FROM providers WHERE kind = ? AND name = ?",
+    input.kind,
+    input.name,
+  );
   const encrypted = input.apiKey ? encryptSecret(input.apiKey) : null;
   if (existing) {
-    run(
+    await run(
       "UPDATE providers SET enabled = ?, config = COALESCE(?, config), updated_at = ? WHERE id = ?",
       input.enabled ? 1 : 0,
       encrypted,
@@ -92,7 +107,7 @@ export function upsertProvider(input: { kind: string; name: string; apiKey: stri
     );
     return;
   }
-  run(
+  await run(
     "INSERT INTO providers (id, kind, name, enabled, config, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     newId(),
     input.kind,
@@ -107,10 +122,10 @@ export function upsertProvider(input: { kind: string; name: string; apiKey: stri
  * Reads a provider credential: an admin-set value in the DB wins, otherwise the
  * environment variable is used. Secrets never leave the server in plaintext.
  */
-export function providerSecret(env: string): string | null {
+export async function providerSecret(env: string): Promise<string | null> {
   const entry = PROVIDER_CATALOG.find((p) => p.env === env);
   if (entry) {
-    const row = one<{ config: string | null; enabled: number }>(
+    const row = await one<{ config: string | null; enabled: number }>(
       "SELECT config, enabled FROM providers WHERE kind = ? AND name = ?",
       entry.kind,
       entry.name,

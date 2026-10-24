@@ -20,12 +20,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hamsa
+          POSTGRES_PASSWORD: hamsa
+          POSTGRES_DB: hamsa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      # Ephemeral values: the suite uses an in-memory database and makes no
-      # network calls, so nothing here is a real secret.
+      # Ephemeral values: the suite runs against the service database and makes
+      # no network calls, so nothing here is a real secret.
       HAMSA_SECRET: "ci-only-secret-not-used-outside-this-workflow"
-      HAMSA_DB_PATH: ":memory:"
+      TEST_DATABASE_URL: "postgres://hamsa:hamsa@127.0.0.1:5432/hamsa_test"
 
     steps:
       - name: Checkout
@@ -43,7 +58,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests
+      - name: Unit and integration tests
         run: npm test
 
       - name: Production build

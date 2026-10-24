@@ -1,23 +1,25 @@
 {
   "name": "hamsa",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Hamsa \u2014 OSINT Intelligence Console for authorized investigations",
+  "description": "Hamsa — OSINT Intelligence Console for authorized investigations",
   "license": "MIT",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs --test tests/*.test.mjs",
-    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs scripts/seed.mjs"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs --test --test-concurrency=1 tests/*.test.mjs",
+    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs scripts/seed.mjs",
+    "migrate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs scripts/migrate.mjs"
   },
   "dependencies": {
     "libphonenumber-js": "^1.13.15",
     "next": "^16.4.2",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "topojson-client": "^3.1.0",
@@ -27,6 +29,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/topojson-client": "^3.1.5",

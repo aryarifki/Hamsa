@@ -18,7 +18,10 @@ const GROUPS: Array<{
 }> = [
   {
     label: "Overview",
-    items: [{ href: "/", label: "Dashboard", icon: "grid" }],
+    items: [
+      { href: "/", label: "Dashboard", icon: "grid" },
+      { href: "/notifications", label: "Notifications", icon: "alert" },
+    ],
   },
   {
     label: "Intelligence",
@@ -74,7 +77,7 @@ function Wordmark() {
   );
 }
 
-export function Sidebar({ user }: { user: NavUser }) {
+export function Sidebar({ user, unread = 0 }: { user: NavUser; unread?: number }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -118,7 +121,13 @@ export function Sidebar({ user }: { user: NavUser }) {
                       >
                         <Icon name={item.icon} size={15} className={active ? "opacity-100" : "opacity-60"} />
                         <span className="truncate">{item.label}</span>
-                        {active && <span className="ml-auto h-1 w-1 rounded-full bg-brass" />}
+                        {item.href === "/notifications" && unread > 0 ? (
+                          <span className="ml-auto rounded-full bg-brass/15 px-1.5 py-0.5 text-[10px] font-semibold text-brass">
+                            {unread > 99 ? "99+" : unread}
+                          </span>
+                        ) : (
+                          active && <span className="ml-auto h-1 w-1 rounded-full bg-brass" />
+                        )}
                       </Link>
                     </li>
                   );

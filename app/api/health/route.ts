@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** Liveness + readiness probe. Deliberately leaks no configuration. */
 export async function GET() {
   try {
-    const row = one<{ ok: number }>("SELECT 1 AS ok");
+    const row = await one<{ ok: number }>("SELECT 1 AS ok");
     return NextResponse.json(
       {
         status: "ok",

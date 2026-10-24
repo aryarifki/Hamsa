@@ -65,7 +65,7 @@ export default async function DashboardPage() {
   const user = await requireUser();
   const since = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10);
 
-  const totals = one<{ total: number; today: number }>(
+  const totals = await one<{ total: number; today: number }>(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS today
      FROM lookups WHERE user_id = ?`,
@@ -73,17 +73,17 @@ export default async function DashboardPage() {
     user.id,
   ) ?? { total: 0, today: 0 };
 
-  const openCases = one<CountRow>("SELECT COUNT(*) AS n FROM cases WHERE user_id = ? AND status = 'open'", user.id)?.n ?? 0;
-  const watching = one<CountRow>("SELECT COUNT(*) AS n FROM watchlist WHERE user_id = ? AND active = 1", user.id)?.n ?? 0;
+  const openCases = (await one<CountRow>("SELECT COUNT(*) AS n FROM cases WHERE user_id = ? AND status = 'open'", user.id))?.n ?? 0;
+  const watching = (await one<CountRow>("SELECT COUNT(*) AS n FROM watchlist WHERE user_id = ? AND active = 1", user.id))?.n ?? 0;
 
-  const byModule = all<{ module: string; n: number }>(
+  const byModule = await all<{ module: string; n: number }>(
     "SELECT module, COUNT(*) AS n FROM lookups WHERE user_id = ? GROUP BY module",
     user.id,
   );
   const moduleCount = new Map(byModule.map((r) => [r.module, r.n]));
 
-  const daily = all<{ d: string; n: number }>(
-    "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS n FROM lookups WHERE user_id = ? AND created_at >= ? GROUP BY d",
+  const daily = await all<{ d: string; n: number }>(
+    "SELECT to_char(created_at, 'YYYY-MM-DD') AS d, COUNT(*) AS n FROM lookups WHERE user_id = ? AND created_at >= ? GROUP BY d",
     user.id,
     since,
   );
@@ -93,7 +93,7 @@ export default async function DashboardPage() {
     return dailyMap.get(d) ?? 0;
   });
 
-  const recent = all<{ id: string; module: string; target: string; status: string; created_at: string; cost: number }>(
+  const recent = await all<{ id: string; module: string; target: string; status: string; created_at: string; cost: number }>(
     "SELECT id, module, target, status, created_at, cost FROM lookups WHERE user_id = ? ORDER BY created_at DESC LIMIT 7",
     user.id,
   );

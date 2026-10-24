@@ -3,6 +3,7 @@ node_modules
 .git
 .github
 data
+storage
 coverage
 *.db
 *.db-journal

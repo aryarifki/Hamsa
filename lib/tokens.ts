@@ -1,4 +1,4 @@
-import { all, newId, now, one, run, tx } from "./db";
+import { newId, now, one, run, tx, type Db } from "./db";
 
 export class InsufficientCreditsError extends Error {
   readonly required: number;
@@ -34,37 +34,43 @@ export function costOf(module: ModuleKey): number {
   return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : DEFAULT_COST[module];
 }
 
-export function balanceOf(userId: string): number {
-  return one<{ credits: number }>("SELECT credits FROM users WHERE id = ?", userId)?.credits ?? 0;
+async function readBalance(db: Db, userId: string): Promise<number> {
+  const row = await db.one<{ credits: number }>("SELECT credits FROM users WHERE id = ?", userId);
+  return row?.credits ?? 0;
+}
+
+export async function balanceOf(userId: string): Promise<number> {
+  const row = await one<{ credits: number }>("SELECT credits FROM users WHERE id = ?", userId);
+  return row?.credits ?? 0;
 }
 
 /**
  * Atomically debits credits and writes the ledger entry. The balance guard is
  * part of the UPDATE statement, so two concurrent lookups can never both
- * succeed against a single remaining credit.
+ * succeed against a single remaining credit. The ledger insert shares the
+ * transaction with the debit.
  */
-export function charge(
+export async function charge(
   userId: string,
   amount: number,
   reason: string,
   refType?: string,
   refId?: string,
-): number {
-  return tx(() => {
-    if (amount <= 0) {
-      return balanceOf(userId);
-    }
-    const res = run(
+): Promise<number> {
+  if (amount <= 0) return balanceOf(userId);
+
+  return tx(async (db) => {
+    const res = await db.run(
       "UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?",
       amount,
       userId,
       amount,
     );
     if (res.changes === 0) {
-      throw new InsufficientCreditsError(amount, balanceOf(userId));
+      throw new InsufficientCreditsError(amount, await readBalance(db, userId));
     }
-    const balance = balanceOf(userId);
-    run(
+    const balance = await readBalance(db, userId);
+    await db.run(
       `INSERT INTO ledger (id, user_id, delta, balance_after, reason, ref_type, ref_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       newId(),
@@ -81,21 +87,21 @@ export function charge(
 }
 
 /** Refunds a charge when the underlying provider call failed. */
-export function refund(userId: string, amount: number, reason: string, refId?: string): number {
+export function refund(userId: string, amount: number, reason: string, refId?: string): Promise<number> {
   return grant(userId, amount, `refund:${reason}`, "lookup", refId);
 }
 
-export function grant(
+export async function grant(
   userId: string,
   amount: number,
   reason: string,
   refType?: string,
   refId?: string,
-): number {
-  return tx(() => {
-    run("UPDATE users SET credits = credits + ? WHERE id = ?", amount, userId);
-    const balance = balanceOf(userId);
-    run(
+): Promise<number> {
+  return tx(async (db) => {
+    await db.run("UPDATE users SET credits = credits + ? WHERE id = ?", amount, userId);
+    const balance = await readBalance(db, userId);
+    await db.run(
       `INSERT INTO ledger (id, user_id, delta, balance_after, reason, ref_type, ref_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       newId(),
@@ -119,8 +125,8 @@ export interface LedgerEntry {
   created_at: string;
 }
 
-export function ledgerFor(userId: string, limit = 50): LedgerEntry[] {
-  return all<LedgerEntry>(
+export async function ledgerFor(userId: string, limit = 50): Promise<LedgerEntry[]> {
+  return (await import("./db")).all<LedgerEntry>(
     `SELECT id, delta, balance_after, reason, created_at
      FROM ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
     userId,

@@ -1,87 +1,79 @@
-import { NextRequest } from "next/server";
 import { z } from "zod";
-import { fail, ok } from "@/lib/http";
-import { all, newId, now, one, run } from "@/lib/db";
 import { sha256 } from "@/lib/crypto";
-import { haversineMeters, validLatLng } from "@/lib/intel/geo";
 import { rateLimit } from "@/lib/rate-limit";
-import { audit } from "@/lib/audit";
+import { recordLocation, TrackForbiddenError } from "@/lib/track/geofence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const schema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-  accuracy: z.number().min(0).max(100_000).optional(),
-  battery: z.number().min(0).max(100).optional(),
-});
+const schema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180).optional(),
+    lng: z.number().min(-180).max(180).optional(),
+    accuracy: z.number().min(0).max(100_000).optional(),
+    battery: z.number().min(0).max(100).optional(),
+    ts: z.string().datetime().optional(),
+  })
+  .refine((value) => value.lon !== undefined || value.lng !== undefined, {
+    message: "lon is required",
+  });
+
+const MAX_PER_MINUTE = 60;
+
+const json = (data: unknown, status = 200): Response =>
+  Response.json(data, { status, headers: { "cache-control": "no-store" } });
 
 /**
  * Consent-gated position ingest.
  *
- * A device authenticates with the one-time token issued at enrolment. It can
- * only write its own position — there is no endpoint to look up a device by
- * phone number or to move another device.
+ * The bearer token is the capability minted at enrolment; the server stores only
+ * its SHA-256 digest. Invalid, unknown and revoked tokens all receive the same
+ * 403 — the endpoint never confirms whether a device exists. Each token is
+ * limited to 60 updates per minute.
+ *
+ * Written against the standard Request/Response types (not `NextRequest`) so the
+ * handler can be exercised directly by the test suite.
  */
-export async function POST(req: NextRequest) {
+export async function POST(req: Request): Promise<Response> {
   const header = req.headers.get("authorization") ?? "";
-  if (!header.startsWith("Bearer dv_")) return fail(401, "Device token required");
-  const token = header.slice(7).trim();
+  const token = header.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return json({ error: "Forbidden" }, 403);
 
-  const device = one<{ id: string; user_id: string; name: string; active: number }>(
-    "SELECT id, user_id, name, active FROM devices WHERE token_hash = ?",
-    sha256(token),
-  );
-  if (!device || !device.active) return fail(401, "Unknown or revoked device token");
-
-  const limit = rateLimit(`ping:${device.id}`, 120, 60_000);
-  if (!limit.allowed) return fail(429, "Too many pings", { retryAfter: limit.retryAfter });
+  const limit = rateLimit(`track:${sha256(token).slice(0, 16)}`, MAX_PER_MINUTE, 60_000);
+  if (!limit.allowed) {
+    return json({ error: "Too many location updates", retryAfter: limit.retryAfter }, 429);
+  }
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return fail(400, "Invalid position payload");
-  const { lat, lng, accuracy, battery } = parsed.data;
-  if (!validLatLng(lat, lng)) return fail(400, "Coordinates out of range");
+  if (!parsed.success) return json({ error: "Invalid location payload" }, 400);
 
-  run(
-    "INSERT INTO device_pings (id, device_id, lat, lng, accuracy, battery, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    newId(),
-    device.id,
-    lat,
-    lng,
-    accuracy ?? null,
-    battery ?? null,
-    now(),
-  );
-  run(
-    "UPDATE devices SET last_seen_at = ?, last_lat = ?, last_lng = ?, last_accuracy = ?, last_battery = ? WHERE id = ?",
-    now(),
-    lat,
-    lng,
-    accuracy ?? null,
-    battery ?? null,
-    device.id,
-  );
+  const { lat, accuracy, battery, ts } = parsed.data;
+  const lon = parsed.data.lon ?? parsed.data.lng!;
 
-  const fences = all<{ id: string; name: string; lat: number; lng: number; radius_m: number }>(
-    "SELECT id, name, lat, lng, radius_m FROM geofences WHERE device_id = ? AND active = 1",
-    device.id,
-  );
-
-  audit({
-    userId: device.user_id,
-    actor: `device:${device.name}`,
-    action: "device.ping",
-    entity: "device",
-    entityId: device.id,
-    meta: { lat, lng, accuracy: accuracy ?? null },
-  });
-
-  return ok({
-    receivedAt: now(),
-    fences: fences.map((f) => {
-      const distance = Math.round(haversineMeters({ lat, lng }, { lat: f.lat, lng: f.lng }));
-      return { id: f.id, name: f.name, inside: distance <= f.radius_m, distanceMeters: distance };
-    }),
-  });
+  try {
+    const result = await recordLocation(token, { lat, lon, accuracy, battery, ts });
+    return json({
+      receivedAt: result.ts,
+      device: { id: result.device.id, name: result.device.name },
+      fences: result.fences.map((fence) => ({
+        id: fence.id,
+        name: fence.name,
+        inside: fence.inside,
+        distanceMeters: fence.distanceM,
+      })),
+      transitions: result.transitions.map((transition) => ({
+        geofenceId: transition.geofenceId,
+        name: transition.name,
+        type: transition.type,
+        distanceMeters: transition.distanceM,
+      })),
+    });
+  } catch (err) {
+    if (err instanceof TrackForbiddenError) return json({ error: "Forbidden" }, 403);
+    const message = (err as Error).message;
+    if (/coordinate|timestamp/i.test(message)) return json({ error: message }, 400);
+    console.error("[track] location update failed:", message);
+    return json({ error: "Location update failed" }, 500);
+  }
 }

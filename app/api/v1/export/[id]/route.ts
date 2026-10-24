@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { authenticate } from "@/lib/http";
-import { lookupById, parsedResult } from "@/lib/lookup";
+import { lookupById, parsedResult, type LookupRecord } from "@/lib/lookup";
 import { audit } from "@/lib/audit";
 import type { ModuleResult } from "@/lib/intel/types";
 
@@ -69,7 +69,7 @@ function toMarkdown(value: unknown, depth = 3): string {
   );
 }
 
-function renderMarkdown(record: NonNullable<ReturnType<typeof lookupById>>, result: ModuleResult | null): string {
+function renderMarkdown(record: LookupRecord, result: ModuleResult | null): string {
   const lines: string[] = [];
   lines.push(`# Hamsa investigation record`);
   lines.push("");
@@ -118,13 +118,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!auth) return new Response("Unauthorized", { status: 401 });
 
   const { id } = await ctx.params;
-  const record = lookupById(id, auth.user.id);
+  const record = await lookupById(id, auth.user.id);
   if (!record) return new Response("Not found", { status: 404 });
 
   const format = new URL(req.url).searchParams.get("format") ?? "json";
   const result = parsedResult(record);
 
-  audit({
+  await audit({
     userId: auth.user.id,
     actor: auth.user.email,
     action: "export.generate",

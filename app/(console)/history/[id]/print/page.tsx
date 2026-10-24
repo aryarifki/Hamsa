@@ -11,7 +11,7 @@ export const metadata = { title: "Printable dossier" };
 export default async function PrintLookupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const record = lookupById(id, user.id);
+  const record = await lookupById(id, user.id);
   if (!record) notFound();
   const result = parsedResult(record);
 

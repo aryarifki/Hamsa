@@ -31,18 +31,18 @@ interface AuditRow {
 
 export default async function AdminPage() {
   const admin = await requireAdmin();
-  const users = all<AdminUser>(
+  const users = await all<AdminUser>(
     "SELECT id, email, name, role, status, credits, created_at, last_login_at FROM users ORDER BY created_at ASC",
   );
-  const providers = listProviders();
+  const providers = await listProviders();
 
-  const totals = one<{ users: number; lookups: number; credits: number }>(
+  const totals = await one<{ users: number; lookups: number; credits: number }>(
     `SELECT (SELECT COUNT(*) FROM users) AS users,
             (SELECT COUNT(*) FROM lookups) AS lookups,
             (SELECT COALESCE(SUM(credits), 0) FROM users) AS credits`,
   ) ?? { users: 0, lookups: 0, credits: 0 };
 
-  const auditRows = all<AuditRow>(
+  const auditRows = await all<AuditRow>(
     "SELECT id, actor, action, entity, entity_id, ip, created_at, meta FROM audit_log ORDER BY created_at DESC LIMIT 80",
   );
 

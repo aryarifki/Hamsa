@@ -19,7 +19,7 @@ interface CaseRow {
 
 export default async function CasesPage() {
   const user = await requireUser();
-  const cases = all<CaseRow>(
+  const cases = await all<CaseRow>(
     `SELECT c.id, c.code, c.title, c.subject, c.status, c.created_at,
             (SELECT COUNT(*) FROM case_items ci WHERE ci.case_id = c.id) AS items
      FROM cases c WHERE c.user_id = ? ORDER BY c.created_at DESC`,

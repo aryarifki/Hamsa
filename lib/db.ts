@@ -1,262 +1,240 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { Pool, types, type PoolClient } from "pg";
 
 /**
- * A single SQLite connection per process. Next.js dev mode re-evaluates modules
- * on every hot reload, so the handle is cached on globalThis to avoid leaking
- * file descriptors (and to keep WAL locks stable).
+ * PostgreSQL access layer.
+ *
+ * The app talks raw SQL through three helpers (`one`, `all`, `run`) plus a
+ * transaction wrapper. Two deliberate conveniences keep the call sites small:
+ *
+ *  1. `?` placeholders are rewritten to `$1..$n` by `toPg()`. The queries were
+ *     written against the previous engine; keeping the marker stable means a
+ *     review can focus on behaviour rather than 150 mechanical edits. Do not
+ *     use the Postgres `?` JSON operator in raw SQL — use `jsonb_exists()`.
+ *  2. `timestamptz` is parsed back to an ISO-8601 UTC string, so every existing
+ *     `a < b` comparison and `new Date(value)` keeps working unchanged.
  */
+
+types.setTypeParser(1184, (value) => new Date(value).toISOString()); // timestamptz → ISO
+types.setTypeParser(1114, (value) => new Date(`${value}Z`).toISOString()); // timestamp → ISO
+types.setTypeParser(20, (value) => Number(value)); // int8 (`COUNT(*)`) → number
+types.setTypeParser(1700, (value) => Number(value)); // numeric (`SUM(...)`) → number
+
+export interface Query {
+  one<T>(sql: string, ...params: unknown[]): Promise<T | undefined>;
+  all<T>(sql: string, ...params: unknown[]): Promise<T[]>;
+  run(sql: string, ...params: unknown[]): Promise<{ changes: number }>;
+}
+
+export interface Db extends Query {
+  /** Multi-statement DDL, no parameters. */
+  exec(sql: string): Promise<void>;
+}
+
+export const newId = (): string => randomUUID();
+export const now = (): string => new Date().toISOString();
+
+/** Rewrites `?` placeholders to `$n`, ignoring quoted strings/identifiers. */
+export function toPg(sql: string): string {
+  let out = "";
+  let index = 0;
+  let quote: "'" | '"' | null = null;
+
+  for (let i = 0; i < sql.length; i += 1) {
+    const char = sql[i];
+
+    if (quote) {
+      out += char;
+      if (char === quote) {
+        if (sql[i + 1] === quote) {
+          out += sql[i + 1];
+          i += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "?") {
+      index += 1;
+      out += `$${index}`;
+      continue;
+    }
+
+    out += char;
+  }
+
+  return out;
+}
+
+interface Runner {
+  query(text: string, values?: unknown[]): Promise<{ rows: unknown[]; rowCount: number | null }>;
+}
+
+function makeDb(runner: Runner): Db {
+  const exec = async (sql: string): Promise<void> => {
+    // No parameter array: node-postgres uses the simple protocol, which allows
+    // several statements separated by semicolons.
+    await runner.query(sql);
+  };
+
+  const query = (sql: string, params: unknown[]) => runner.query(toPg(sql), params);
+
+  return {
+    exec,
+    async one<T>(sql: string, ...params: unknown[]): Promise<T | undefined> {
+      const result = await query(sql, params);
+      return result.rows[0] as T | undefined;
+    },
+    async all<T>(sql: string, ...params: unknown[]): Promise<T[]> {
+      const result = await query(sql, params);
+      return result.rows as T[];
+    },
+    async run(sql: string, ...params: unknown[]): Promise<{ changes: number }> {
+      const result = await query(sql, params);
+      return { changes: result.rowCount ?? 0 };
+    },
+  };
+}
+
 declare global {
   // eslint-disable-next-line no-var
-  var __hamsaDb: DatabaseSync | undefined;
+  var __hamsaPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var __hamsaSchema: Promise<void> | undefined;
 }
 
-const SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
+function getPool(): Pool {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error(
+      "DATABASE_URL is not set. Hamsa requires PostgreSQL — see README § Setup (postgres://user:pass@host:5432/hamsa).",
+    );
+  }
 
-CREATE TABLE IF NOT EXISTS users (
-  id            TEXT PRIMARY KEY,
-  email         TEXT NOT NULL UNIQUE,
-  name          TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'analyst',
-  status        TEXT NOT NULL DEFAULT 'active',
-  credits       INTEGER NOT NULL DEFAULT 0,
-  created_at    TEXT NOT NULL,
-  last_login_at TEXT
-);
+  if (!globalThis.__hamsaPool) {
+    const pool = new Pool({
+      connectionString,
+      max: Number(process.env.HAMSA_PG_POOL ?? 10),
+      application_name: "hamsa",
+    });
+    pool.on("error", (err) => console.error("[db] idle client error:", err.message));
+    globalThis.__hamsaPool = pool;
+  }
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  ip         TEXT,
-  user_agent TEXT,
-  revoked_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-
-CREATE TABLE IF NOT EXISTS ledger (
-  id            TEXT PRIMARY KEY,
-  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  delta         INTEGER NOT NULL,
-  balance_after INTEGER NOT NULL,
-  reason        TEXT NOT NULL,
-  ref_type      TEXT,
-  ref_id        TEXT,
-  created_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger(user_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS lookups (
-  id          TEXT PRIMARY KEY,
-  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  module      TEXT NOT NULL,
-  target      TEXT NOT NULL,
-  status      TEXT NOT NULL,
-  cost        INTEGER NOT NULL DEFAULT 0,
-  provider    TEXT,
-  result      TEXT,
-  error       TEXT,
-  created_at  TEXT NOT NULL,
-  duration_ms INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_lookups_user ON lookups(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_lookups_module ON lookups(module, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS cases (
-  id                TEXT PRIMARY KEY,
-  user_id           TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  code              TEXT NOT NULL,
-  title             TEXT NOT NULL,
-  subject           TEXT,
-  purpose           TEXT NOT NULL,
-  authorization_ref TEXT NOT NULL,
-  status            TEXT NOT NULL DEFAULT 'open',
-  created_at        TEXT NOT NULL,
-  closed_at         TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_cases_user ON cases(user_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS case_items (
-  case_id  TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
-  lookup_id TEXT NOT NULL REFERENCES lookups(id) ON DELETE CASCADE,
-  added_at TEXT NOT NULL,
-  PRIMARY KEY (case_id, lookup_id)
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT,
-  actor      TEXT,
-  action     TEXT NOT NULL,
-  entity     TEXT,
-  entity_id  TEXT,
-  meta       TEXT,
-  ip         TEXT,
-  user_agent TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS api_keys (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name         TEXT NOT NULL,
-  prefix       TEXT NOT NULL,
-  key_hash     TEXT NOT NULL UNIQUE,
-  scopes       TEXT NOT NULL DEFAULT 'lookup',
-  created_at   TEXT NOT NULL,
-  last_used_at TEXT,
-  revoked_at   TEXT
-);
-
-CREATE TABLE IF NOT EXISTS providers (
-  id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL,
-  name       TEXT NOT NULL,
-  enabled    INTEGER NOT NULL DEFAULT 1,
-  config     TEXT,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS watchlist (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  module       TEXT NOT NULL,
-  target       TEXT NOT NULL,
-  interval_hours INTEGER NOT NULL DEFAULT 24,
-  active       INTEGER NOT NULL DEFAULT 1,
-  last_run_at  TEXT,
-  last_status  TEXT,
-  last_result  TEXT,
-  created_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_watch_user ON watchlist(user_id);
-
-CREATE TABLE IF NOT EXISTS devices (
-  id            TEXT PRIMARY KEY,
-  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name          TEXT NOT NULL,
-  token_hash    TEXT NOT NULL UNIQUE,
-  consent_ref   TEXT NOT NULL,
-  active        INTEGER NOT NULL DEFAULT 1,
-  created_at    TEXT NOT NULL,
-  last_seen_at  TEXT,
-  last_lat      REAL,
-  last_lng      REAL,
-  last_accuracy REAL,
-  last_battery  REAL
-);
-
-CREATE TABLE IF NOT EXISTS geofences (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,
-  lat        REAL NOT NULL,
-  lng        REAL NOT NULL,
-  radius_m   INTEGER NOT NULL,
-  active     INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS device_pings (
-  id       TEXT PRIMARY KEY,
-  device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  lat      REAL NOT NULL,
-  lng      REAL NOT NULL,
-  accuracy REAL,
-  battery  REAL,
-  at       TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_pings_device ON device_pings(device_id, at DESC);
-
-CREATE TABLE IF NOT EXISTS cctv_assets (
-  id              TEXT PRIMARY KEY,
-  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name            TEXT NOT NULL,
-  protocol        TEXT NOT NULL DEFAULT 'rtsp',
-  endpoint_enc    TEXT NOT NULL,
-  username        TEXT,
-  status          TEXT NOT NULL DEFAULT 'unknown',
-  last_checked_at TEXT,
-  created_at      TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS telegram_sources (
-  id             TEXT PRIMARY KEY,
-  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  channel        TEXT NOT NULL,
-  active         INTEGER NOT NULL DEFAULT 1,
-  last_synced_at TEXT,
-  created_at     TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-`;
-
-function open(): DatabaseSync {
-  const configured = process.env.HAMSA_DB_PATH;
-  const file =
-    configured === ":memory:"
-      ? ":memory:"
-      : configured
-        ? resolve(/* turbopackIgnore: true */ configured)
-        : resolve(process.cwd(), "data", "hamsa.db");
-  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
-  const handle = new DatabaseSync(file);
-  handle.exec(SCHEMA);
-  return handle;
+  return globalThis.__hamsaPool;
 }
 
-export const db: DatabaseSync = globalThis.__hamsaDb ?? (globalThis.__hamsaDb = open());
-
-export const now = (): string => new Date().toISOString();
-export const newId = (): string => crypto.randomUUID();
-
-/** Typed convenience wrappers around node:sqlite prepared statements. */
-export function one<T = Record<string, unknown>>(sql: string, ...params: unknown[]): T | undefined {
-  return db.prepare(sql).get(...(params as never[])) as T | undefined;
+/** A `Db` bound to a dedicated client (transactions, migrations, tests). */
+export function clientDb(client: PoolClient): Db {
+  return makeDb(client);
 }
 
-export function all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): T[] {
-  return db.prepare(sql).all(...(params as never[])) as T[];
+/** The process-wide pool, created lazily on first use. */
+export function poolDb(): Db {
+  return makeDb(getPool());
 }
 
-export function run(sql: string, ...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-  return db.prepare(sql).run(...(params as never[])) as { changes: number; lastInsertRowid: number | bigint };
-}
+export const db: Db = {
+  one: (sql, ...params) => poolDb().one(sql, ...params),
+  all: (sql, ...params) => poolDb().all(sql, ...params),
+  run: (sql, ...params) => poolDb().run(sql, ...params),
+  exec: (sql) => poolDb().exec(sql),
+};
 
-/** Runs fn inside a write transaction, rolling back on any throw. */
-export function tx<T>(fn: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
+export const one = db.one;
+export const all = db.all;
+export const run = db.run;
+
+/** Runs `fn` on one client without opening a transaction. */
+export async function withClient<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
   try {
-    const out = fn();
-    db.exec("COMMIT");
-    return out;
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
+    return await fn(clientDb(client));
+  } finally {
+    client.release();
   }
 }
 
-export function getSetting(key: string, fallback = ""): string {
-  const row = one<{ value: string }>("SELECT value FROM settings WHERE key = ?", key);
-  return row?.value ?? fallback;
+/**
+ * Runs `fn` inside a transaction on a single client. Every query in the
+ * callback must go through the provided `Db`; the process-wide helpers would
+ * take a different connection and escape the transaction.
+ */
+export async function tx<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(clientDb(client));
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-export function setSetting(key: string, value: string): void {
-  run(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    key,
-    value,
-  );
+const SCHEMA_LOCK = 741_852_963;
+
+/**
+ * Applies the baseline schema and every pending migration. Cached per process
+ * and guarded by an advisory lock so several Next workers booting at once do
+ * not race each other through the migration table.
+ */
+export function ensureSchema(): Promise<void> {
+  if (!globalThis.__hamsaSchema) {
+    globalThis.__hamsaSchema = withClient(async (client) => {
+      await client.exec(`SELECT pg_advisory_lock(${SCHEMA_LOCK})`);
+      try {
+        const { SCHEMA } = await import("./schema");
+        const { applyMigrations } = await import("./migrations");
+        await client.exec(SCHEMA);
+        await applyMigrations(client);
+      } finally {
+        await client.exec(`SELECT pg_advisory_unlock(${SCHEMA_LOCK})`).catch(() => undefined);
+      }
+    }).catch((err) => {
+      globalThis.__hamsaSchema = undefined;
+      throw err;
+    });
+  }
+
+  return globalThis.__hamsaSchema;
+}
+
+/**
+ * Drops every row. Test-only: guarded so it can never run in production by
+ * accident.
+ */
+export async function resetDatabase(): Promise<void> {
+  if (process.env.NODE_ENV !== "test" && process.env.HAMSA_ALLOW_DB_RESET !== "true") {
+    throw new Error("resetDatabase() is only available with NODE_ENV=test or HAMSA_ALLOW_DB_RESET=true");
+  }
+  await ensureSchema();
+  await db.exec(`
+    TRUNCATE TABLE
+      notifications, camera_events, camera_snapshots, cameras,
+      geofence_events, device_locations, geofences, tracked_devices,
+      watchlist, api_keys, case_items, cases, lookups, ledger, sessions,
+      audit_log, providers, settings, telegram_sources, users
+    RESTART IDENTITY CASCADE;
+  `);
+}
+
+export async function closePool(): Promise<void> {
+  if (globalThis.__hamsaPool) {
+    const pool = globalThis.__hamsaPool;
+    globalThis.__hamsaPool = undefined;
+    globalThis.__hamsaSchema = undefined;
+    await pool.end();
+  }
 }

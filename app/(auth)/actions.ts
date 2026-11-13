@@ -8,6 +8,7 @@ import { grant } from "@/lib/tokens";
 import { audit } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
 import { one } from "@/lib/db";
+import { clientIpFromHeaders } from "@/lib/http";
 
 export interface AuthState {
   error?: string;
@@ -18,11 +19,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 async function requestMeta() {
   const h = await headers();
   return {
-    ip:
-      h.get("cf-connecting-ip") ||
-      h.get("x-real-ip") ||
-      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      "unknown",
+    ip: clientIpFromHeaders(h),
     ua: h.get("user-agent") ?? "unknown",
   };
 }
@@ -32,12 +29,19 @@ function throttled(key: string): boolean {
   return !rateLimit(key, limit, 60_000).allowed;
 }
 
+function authThrottled(kind: "login" | "register", ip: string, email: string): boolean {
+  // Check both keys; do not short-circuit so each bucket observes the attempt.
+  const byIp = throttled(`${kind}:ip:${ip}`);
+  const byEmail = throttled(`${kind}:email:${email}`);
+  return byIp || byEmail;
+}
+
 export async function loginAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const { ip, ua } = await requestMeta();
 
-  if (throttled(`login:${ip}`)) {
+  if (authThrottled("login", ip, email)) {
     return { error: "Too many attempts. Wait a minute and try again." };
   }
   if (!EMAIL_RE.test(email) || password.length < 1) {
@@ -62,7 +66,7 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
   const accept = formData.get("accept") === "on";
   const { ip, ua } = await requestMeta();
 
-  if (throttled(`register:${ip}`)) {
+  if (authThrottled("register", ip, email)) {
     return { error: "Too many attempts. Wait a minute and try again." };
   }
   if (!EMAIL_RE.test(email)) return { error: "Enter a valid email address." };
@@ -70,7 +74,7 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
   if (password.length < 12) return { error: "Use a password of at least 12 characters." };
   if (!accept) return { error: "You must accept the acceptable-use terms." };
   if (await one("SELECT id FROM users WHERE email = ?", email)) {
-    return { error: "An account with that email already exists." };
+    return { error: "If that address can be used, an account can be created with it." };
   }
 
   const credits = Number(process.env.HAMSA_SIGNUP_CREDITS ?? 25);

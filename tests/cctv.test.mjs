@@ -17,6 +17,7 @@ const db = await import("../lib/db.ts");
 const crypto = await import("../lib/crypto.ts");
 const users = await import("../lib/users.ts");
 const service = await import("../lib/cctv/service.ts");
+const ffmpeg = await import("../lib/cctv/ffmpeg.ts");
 
 const W = 320;
 const H = 240;
@@ -289,4 +290,15 @@ test("deleting a camera removes its metadata and snapshot files", async () => {
   await service.deleteCamera(camera.id, analyst);
   assert.equal(await service.cameraForUser(camera.id, analyst), undefined);
   assert.throws(() => readdirSync(join(storage, "cameras", camera.id)));
+});
+
+test("production camera checks reject private network addresses", async () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  delete process.env.HAMSA_CCTV_ALLOW_PRIVATE_NETWORKS;
+  await assert.rejects(
+    () => ffmpeg.assertMediaInput("http://127.0.0.1:3010/api/health"),
+    /Private and loopback/,
+  );
+  process.env.NODE_ENV = previous;
 });

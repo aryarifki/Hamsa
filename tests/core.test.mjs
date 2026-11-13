@@ -14,6 +14,7 @@ const ip = await import("../lib/intel/ip.ts");
 const db = await import("../lib/db.ts");
 const users = await import("../lib/users.ts");
 const tokens = await import("../lib/tokens.ts");
+const http = await import("../lib/http.ts");
 
 before(async () => {
   await db.ensureSchema();
@@ -188,4 +189,16 @@ test("module cost honours the environment override", () => {
   assert.equal(tokens.costOf("phone"), 2);
   process.env.HAMSA_COST_TELEGRAM = "9";
   assert.equal(tokens.costOf("telegram"), 9);
+});
+
+test("proxy headers are ignored unless the proxy is explicitly trusted", () => {
+  const headers = new Headers({
+    "x-forwarded-for": "198.51.100.10, 203.0.113.7",
+    "cf-connecting-ip": "198.51.100.10",
+  });
+  delete process.env.HAMSA_TRUST_PROXY;
+  assert.equal(http.clientIpFromHeaders(headers), "direct");
+  process.env.HAMSA_TRUST_PROXY = "true";
+  assert.equal(http.clientIpFromHeaders(headers), "198.51.100.10");
+  delete process.env.HAMSA_TRUST_PROXY;
 });

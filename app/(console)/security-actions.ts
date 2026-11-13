@@ -47,7 +47,7 @@ export async function changePasswordAction(
   await audit({
     userId: user.id,
     actor: user.email,
-    action: "auth.login",
+    action: "auth.password_change",
     entity: "user",
     entityId: user.id,
     meta: { event: "password_changed" },

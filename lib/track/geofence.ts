@@ -65,6 +65,9 @@ export async function createGeofence(input: {
 
   const radius = Math.max(20, Math.min(200_000, Math.round(input.radiusM)));
   const deviceId = input.deviceId?.trim() || null;
+  if (!deviceId && input.user.role !== "admin") {
+    throw new Error("Only administrators can create organisation-wide fences");
+  }
   if (deviceId) {
     const device = await deviceForUser(deviceId, input.user);
     if (!device) throw new Error("Device not found");

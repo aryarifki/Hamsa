@@ -1,4 +1,4 @@
-import { all, now, run } from "./db";
+import { all, now, run, tx } from "./db";
 import { userById } from "./users";
 import { runLookup } from "./lookup";
 import { costOf, InsufficientCreditsError } from "./tokens";
@@ -32,14 +32,27 @@ export interface WatchRunSummary {
  * skipped rather than allowed to run up a negative balance.
  */
 export async function runDueWatchlist(maxItems = 10): Promise<WatchRunSummary> {
-  const due = await all<WatchRow>(
-    `SELECT * FROM watchlist
-     WHERE active = 1
-       AND (last_run_at IS NULL OR last_run_at + (interval_hours * INTERVAL '1 hour') <= now())
-     ORDER BY COALESCE(last_run_at, TIMESTAMPTZ '1970-01-01') ASC
-     LIMIT ?`,
-    maxItems,
-  );
+  const due = await tx(async (db) => {
+    const claimed = await db.all<WatchRow>(
+      `WITH due AS (
+         SELECT id FROM watchlist
+         WHERE active = 1
+           AND (last_status IS DISTINCT FROM 'running'
+                OR last_run_at + (interval_hours * INTERVAL '1 hour') <= now())
+           AND (last_run_at IS NULL OR last_run_at + (interval_hours * INTERVAL '1 hour') <= now())
+         ORDER BY COALESCE(last_run_at, TIMESTAMPTZ '1970-01-01') ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT ?
+       )
+       UPDATE watchlist w
+       SET last_run_at = now(), last_status = 'running'
+       FROM due
+       WHERE w.id = due.id
+       RETURNING w.*`,
+      maxItems,
+    );
+    return claimed;
+  });
 
   const summary: WatchRunSummary = { checked: 0, skipped: 0, errors: 0, results: [] };
 

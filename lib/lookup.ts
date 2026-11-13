@@ -8,6 +8,8 @@ import { investigateUsername } from "./intel/username";
 import { investigateTelegram } from "./intel/telegram";
 import type { ModuleResult } from "./intel/types";
 import type { User } from "./users";
+import { isIP } from "node:net";
+import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 
 export interface LookupInput {
   user: User;
@@ -59,6 +61,23 @@ async function dispatch(input: LookupInput): Promise<ModuleResult> {
   }
 }
 
+function validateTarget(module: ModuleKey, target: string): void {
+  if (module === "ip" && isIP(target) === 0) throw new LookupError(400, "Invalid IP address");
+  if (module === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(target)) {
+    throw new LookupError(400, "Invalid email address");
+  }
+  if (module === "username" && !/^[a-zA-Z0-9._-]{1,64}$/.test(target.replace(/^@/, ""))) {
+    throw new LookupError(400, "Invalid username");
+  }
+  if (module === "telegram" && !/^[a-zA-Z][a-zA-Z0-9_]{3,31}$/.test(target.replace(/^@/, "").replace(/^https?:\/\/t\.me\/(s\/)?/, ""))) {
+    throw new LookupError(400, "Invalid Telegram channel");
+  }
+  if (module === "phone") {
+    const parsed = parsePhoneNumberFromString(target, "ID");
+    if (!parsed || !parsed.isPossible()) throw new LookupError(400, "Invalid phone number");
+  }
+}
+
 export async function runLookup(input: LookupInput) {
   if (input.user.role === "viewer") {
     throw new LookupError(403, "Viewer accounts cannot run lookups");
@@ -67,6 +86,7 @@ export async function runLookup(input: LookupInput) {
   const target = input.target.trim();
   if (!target) throw new LookupError(400, "Target is required");
   if (target.length > 320) throw new LookupError(400, "Target is too long");
+  validateTarget(input.module, target);
 
   if (input.caseId) {
     const owned = await one<{ id: string }>(

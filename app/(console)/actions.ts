@@ -338,6 +338,14 @@ export async function updateUserAction(formData: FormData): Promise<void> {
   if (id === admin.id && status === "suspended") throw new Error("You cannot suspend your own account");
   if (!["admin", "analyst", "viewer"].includes(role)) throw new Error("Invalid role");
   if (!["active", "suspended"].includes(status)) throw new Error("Invalid status");
+  if (id === admin.id && role !== "admin") throw new Error("You cannot remove your own administrator role");
+  if (role !== "admin" || status !== "active") {
+    const target = await one<{ role: string; status: string }>("SELECT role, status FROM users WHERE id = ?", id);
+    if (target?.role === "admin" && target.status === "active") {
+      const count = await one<{ n: number }>("SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND status = 'active'");
+      if ((count?.n ?? 0) <= 1) throw new Error("At least one active administrator must remain");
+    }
+  }
   await run("UPDATE users SET role = ?, status = ? WHERE id = ?", role, status, id);
   await audit({
     userId: admin.id,

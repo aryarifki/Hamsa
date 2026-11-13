@@ -4,6 +4,7 @@ export type AuditAction =
   | "auth.login"
   | "auth.logout"
   | "auth.login_failed"
+  | "auth.password_change"
   | "auth.register"
   | "lookup.run"
   | "lookup.denied"

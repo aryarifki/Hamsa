@@ -14,5 +14,5 @@ export async function POST(req: Request) {
     });
   }
   await destroySession();
-  return NextResponse.redirect(new URL("/login", req.url), { status: 303 });
+  return new NextResponse(null, { status: 303, headers: { Location: "/login" } });
 }

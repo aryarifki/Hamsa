@@ -88,7 +88,7 @@ export default async function TrackingPage() {
           </ul>
         )}
 
-        <form action={createFenceAction} className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto]">
+        {user.role === "admin" && <form action={createFenceAction} className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto]">
           <input name="name" className="input py-1.5 text-[12px]" placeholder="Fence name (e.g. Head office)" required />
           <input name="lat" className="input mono py-1.5 text-[12px]" placeholder="Latitude" required />
           <input name="lon" className="input mono py-1.5 text-[12px]" placeholder="Longitude" required />
@@ -105,7 +105,7 @@ export default async function TrackingPage() {
           <button type="submit" className="btn px-2 py-1.5 text-[11.5px]">
             <Icon name="plus" size={12} /> Add
           </button>
-        </form>
+        </form>}
       </section>
 
       <section className="space-y-3">

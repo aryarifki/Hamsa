@@ -198,6 +198,20 @@ test("an organisation-wide fence applies to every device", async () => {
   assert.ok(result.transitions.some((transition) => transition.type === "enter"));
 });
 
+test("analysts cannot create organisation-wide fences", async () => {
+  await assert.rejects(
+    () => geofence.createGeofence({
+      user: owner,
+      name: "Private attempt",
+      lat: -6.3,
+      lon: 106.9,
+      radiusM: 500,
+      deviceId: null,
+    }),
+    /Only administrators/,
+  );
+});
+
 test("the HTTP endpoint rejects every unusable token with the same 403", async () => {
   const missing = await post("");
   assert.equal(missing.status, 403);

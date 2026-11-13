@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { renameSync, rmSync, statSync } from "node:fs";
+import { promises as dns } from "node:dns";
+import { isIP } from "node:net";
 
 /**
  * Thin ffmpeg wrapper. Everything goes through an injectable `Runner` so the
@@ -78,11 +80,28 @@ export const defaultRunner: Runner = (args, { timeoutMs = 20_000 } = {}) =>
  * described in the README; they are refused in production unless the operator
  * explicitly opts in.
  */
-export function assertMediaInput(input: string): void {
+function privateAddress(address: string): boolean {
+  if (isIP(address) === 4) {
+    const p = address.split(".").map(Number);
+    return p[0] === 0 || p[0] === 10 || p[0] === 127 || p[0] === 169 && p[1] === 254 ||
+      p[0] === 192 && p[1] === 168 || p[0] === 172 && p[1] >= 16 && p[1] <= 31 ||
+      p[0] === 100 && p[1] >= 64 && p[1] <= 127;
+  }
+  return address === "::1" || /^(fc|fd|fe8|fe9|fea|feb)/i.test(address);
+}
+
+export async function assertMediaInput(input: string): Promise<void> {
   const value = input.trim();
   if (!value) throw new Error("Stream URL is empty");
 
-  if (/^(rtsp|rtsps|http|https):\/\//i.test(value)) return;
+  if (/^(rtsp|rtsps|http|https):\/\//i.test(value)) {
+    const host = new URL(value).hostname;
+    const addresses = isIP(host) ? [host] : (await dns.lookup(host, { all: true, verbatim: true })).map((row) => row.address);
+    if ((process.env.HAMSA_CCTV_ALLOW_PRIVATE_NETWORKS !== "true" && process.env.NODE_ENV === "production") && addresses.some(privateAddress)) {
+      throw new Error("Private and loopback camera networks are disabled in production");
+    }
+    return;
+  }
 
   if (/^file:\/\//i.test(value) || value.startsWith("/")) {
     const allowed =
@@ -163,7 +182,7 @@ export async function probeStream(
   runner: Runner = defaultRunner,
   timeoutMs = 12_000,
 ): Promise<OperationResult> {
-  assertMediaInput(input);
+  await assertMediaInput(input);
   const result = await runner(
     ["-hide_banner", "-loglevel", "error", ...inputArgs(input), "-t", "2", "-f", "null", "-"],
     { timeoutMs },
@@ -178,7 +197,7 @@ export async function captureSnapshot(
   runner: Runner = defaultRunner,
   timeoutMs = 25_000,
 ): Promise<OperationResult> {
-  assertMediaInput(input);
+  await assertMediaInput(input);
   const temp = `${outPath}.part.jpg`;
   const result = await runner(
     ["-hide_banner", "-loglevel", "error", "-y", ...inputArgs(input), "-frames:v", "1", "-q:v", "3", temp],
@@ -217,7 +236,7 @@ export async function captureGrayFrames(
   runner: Runner = defaultRunner,
   timeoutMs = 25_000,
 ): Promise<{ ok: boolean; frames: Uint8Array[]; width: number; height: number; kind?: FailureKind; detail?: string }> {
-  assertMediaInput(input);
+  await assertMediaInput(input);
   const width = options.width ?? 320;
   const height = options.height ?? 240;
   const fps = options.fps ?? 5;

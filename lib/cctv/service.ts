@@ -1,4 +1,4 @@
-import { all, newId, now, one, run } from "../db";
+import { all, newId, now, one, run, tx } from "../db";
 import { audit } from "../audit";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { notifyAdmins } from "../notify";
@@ -158,6 +158,10 @@ export async function createCamera(input: CreateCameraInput): Promise<Camera> {
     username = split.username;
     password = split.password;
     streamUrl = split.url;
+  }
+
+  if (streamUrl.startsWith("/") && (process.env.HAMSA_CCTV_ALLOW_LOCAL_MEDIA === "true" || process.env.NODE_ENV !== "production")) {
+    streamUrl = `file://${streamUrl}`;
   }
 
   const parsed = new URL(streamUrl);
@@ -628,15 +632,24 @@ export interface CameraRunSummary {
  * them, which is the point of fail-closed.
  */
 export async function runDueCameras(limit = 5, deps: CameraDeps = {}): Promise<CameraRunSummary> {
-  const due = await all<Camera>(
-    `SELECT * FROM cameras
-     WHERE status NOT IN ('disabled_auth', 'needs_config')
-       AND (last_snapshot_at IS NULL
-            OR last_snapshot_at + (snapshot_interval_s * INTERVAL '1 second') <= now())
-     ORDER BY COALESCE(last_snapshot_at, TIMESTAMPTZ '1970-01-01') ASC
-     LIMIT ?`,
+  const due = await tx(async (db) => db.all<Camera>(
+    `WITH due AS (
+       SELECT id FROM cameras
+       WHERE status NOT IN ('disabled_auth', 'needs_config')
+         AND (status <> 'running' OR updated_at + (snapshot_interval_s * INTERVAL '1 second') <= now())
+         AND (last_snapshot_at IS NULL
+              OR last_snapshot_at + (snapshot_interval_s * INTERVAL '1 second') <= now())
+       ORDER BY COALESCE(last_snapshot_at, TIMESTAMPTZ '1970-01-01') ASC
+       FOR UPDATE SKIP LOCKED
+       LIMIT ?
+     )
+     UPDATE cameras c
+     SET status = 'running', updated_at = now()
+     FROM due
+     WHERE c.id = due.id
+     RETURNING c.*`,
     limit,
-  );
+  ));
 
   const summary: CameraRunSummary = {
     checked: 0,

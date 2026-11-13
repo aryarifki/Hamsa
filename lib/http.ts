@@ -29,13 +29,21 @@ export function fail(status: number, message: string, extra?: Record<string, unk
 }
 
 export function clientIp(req: Request): string {
-  const h = req.headers;
-  return (
-    h.get("cf-connecting-ip") ||
-    h.get("x-real-ip") ||
-    h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "unknown"
-  );
+  return clientIpFromHeaders(req.headers, (req as Request & { ip?: string }).ip);
+}
+
+/** Proxy headers are untrusted unless the deployment explicitly opts in. */
+export function clientIpFromHeaders(headers: Headers, directIp?: string): string {
+  if (process.env.HAMSA_TRUST_PROXY === "true") {
+    return (
+      headers.get("cf-connecting-ip")?.trim() ||
+      headers.get("x-real-ip")?.trim() ||
+      headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ||
+      directIp?.trim() ||
+      "unknown"
+    );
+  }
+  return directIp?.trim() || "direct";
 }
 
 export function userAgent(req: Request): string {

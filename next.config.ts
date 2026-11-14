@@ -1,11 +1,15 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  // The public tunnel previously cached a 404 for one old `/_next` chunk.
+  // Namespace the Hamsa bundle so every deployment gets a fresh asset URL.
+  assetPrefix: "/hamsa-assets",
   output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
   async rewrites() {
     return [
+      { source: "/hamsa-assets/_next/:path*", destination: "/_next/:path*" },
       { source: "/osiris", destination: "http://127.0.0.1:3102" },
       { source: "/osiris/:path*", destination: "http://127.0.0.1:3102/:path*" },
     ];

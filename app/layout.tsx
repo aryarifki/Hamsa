@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { BuildMarker } from "@/components/BuildMarker";
 
 export const metadata: Metadata = {
   title: {
@@ -21,7 +22,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>{children}</body>
+      <body>
+        <BuildMarker />
+        {children}
+      </body>
     </html>
   );
 }

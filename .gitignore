@@ -4,6 +4,7 @@ out/
 build/
 dist/
 coverage/
+.cache/
 
 .env
 .env.local

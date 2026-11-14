@@ -26,12 +26,17 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error(`[OSIRIS] ${this.props.name || 'Component'} Error:`, error, errorInfo);
     // A chunk from an earlier deploy: only a reload onto the current build can recover.
-    if (isChunkLoadError(error) && claimChunkReload()) window.location.reload();
+    if (isChunkLoadError(error) && claimChunkReload()) {
+      window.location.href = window.location.pathname + '?reload=' + Date.now();
+    }
   }
 
   private retry = () => {
-    if (isChunkLoadError(this.state.error)) window.location.reload();
-    else this.setState({ hasError: false });
+    if (isChunkLoadError(this.state.error)) {
+      window.location.href = window.location.pathname + '?reload=' + Date.now();
+    } else {
+      this.setState({ hasError: false });
+    }
   };
 
   render() {

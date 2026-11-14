@@ -35,6 +35,11 @@ export function loadCameraCatalog(onBatch: (cameras: CatalogCamera[]) => void, o
       timer = setTimeout(() => void load(remaining), attempts * 15_000);
     }
   };
-  void load(['all']);
+  // Phone-X opens on its Indonesia situation layer. Loading the global
+  // catalogue first fans out to dozens of upstream authorities and delays the
+  // globe; SE Asia includes Indonesia and returns the first useful camera set
+  // in seconds. Other regions remain available through the layer/viewport
+  // catalogue requests after the map is interactive.
+  void load(['seasia']);
   return () => { controller.abort(); clearTimeout(timer); };
 }

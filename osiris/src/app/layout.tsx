@@ -70,23 +70,23 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
-      { url: "/favicon-16x16.png", type: "image/png", sizes: "16x16" },
-      { url: "/android-chrome-192x192.png", type: "image/png", sizes: "192x192" },
-      { url: "/android-chrome-512x512.png", type: "image/png", sizes: "512x512" },
+      { url: "/osiris/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+      { url: "/osiris/favicon-16x16.png", type: "image/png", sizes: "16x16" },
+      { url: "/osiris/android-chrome-192x192.png", type: "image/png", sizes: "192x192" },
+      { url: "/osiris/android-chrome-512x512.png", type: "image/png", sizes: "512x512" },
     ],
     apple: [
-      { url: "/apple-touch-icon.png", sizes: "180x180" },
+      { url: "/osiris/apple-touch-icon.png", sizes: "180x180" },
     ],
-    shortcut: "/favicon.ico",
+    shortcut: "/osiris/favicon.ico",
     other: [
       {
         rel: "apple-touch-icon-precomposed",
-        url: "/apple-touch-icon.png",
+        url: "/osiris/apple-touch-icon.png",
       },
     ],
   },
-  manifest: "/site.webmanifest",
+  manifest: "/osiris/site.webmanifest",
   alternates: {
     canonical: SITE_URL,
   },
@@ -184,10 +184,10 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="icon" href="/osiris/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/osiris/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/osiris/favicon-16x16.png" />
+        <link rel="apple-touch-icon" href="/osiris/apple-touch-icon.png" />
         <link rel="canonical" href={SITE_URL} />
         
         {/* JSON-LD Structured Data */}

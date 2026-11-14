@@ -31,6 +31,10 @@ const config: NextConfig = {
 
     return [
       {
+        source: "/osiris",
+        headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "Content-Security-Policy", value: csp },

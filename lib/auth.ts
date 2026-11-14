@@ -10,6 +10,18 @@ export { checkCredentials, createUser, isAdmin, isOperator, userByEmail, userByI
 export const SESSION_COOKIE = "hamsa_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 
+/** Sets the browser cookie for a token that was already persisted. */
+export async function setSessionCookie(token: string): Promise<void> {
+  const store = await cookies();
+  store.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.HAMSA_SECURE_COOKIES === "true" || process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_TTL_MS / 1000,
+  });
+}
+
 export async function createSession(userId: string, ip: string, userAgent: string): Promise<void> {
   const token = randomToken(32);
   const expires = new Date(Date.now() + SESSION_TTL_MS).toISOString();
@@ -22,14 +34,7 @@ export async function createSession(userId: string, ip: string, userAgent: strin
     ip,
     userAgent.slice(0, 400),
   );
-  const store = await cookies();
-  store.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.HAMSA_SECURE_COOKIES === "true" || process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: SESSION_TTL_MS / 1000,
-  });
+  await setSessionCookie(token);
 }
 
 export async function destroySession(): Promise<void> {

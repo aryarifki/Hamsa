@@ -34,6 +34,36 @@ const GROUPS: Array<{
     ],
   },
   {
+    label: "Phone pivots",
+    items: [
+      { href: "/lookup/hlr", label: "HLR & carrier", icon: "phone" },
+      { href: "/lookup/whatsapp", label: "WhatsApp", icon: "send" },
+      { href: "/lookup/getcontact", label: "Caller-ID tags", icon: "users" },
+      { href: "/lookup/ewallet", label: "E-wallet", icon: "card" },
+      { href: "/lookup/breach", label: "Breach exposure", icon: "alert" },
+      { href: "/lookup/humint", label: "HUMINT records", icon: "folder" },
+      { href: "/lookup/public-evidence", label: "Public evidence", icon: "eye" },
+    ],
+  },
+  {
+    label: "Identity & links",
+    items: [
+      { href: "/lookup/name", label: "Name", icon: "users" },
+      { href: "/lookup/domain", label: "Domain", icon: "globe" },
+      { href: "/lookup/telegram-analytics", label: "TG analytics", icon: "send" },
+      { href: "/tools/qr", label: "QR decoder", icon: "search" },
+      { href: "/graph", label: "Link graph", icon: "eye" },
+    ],
+  },
+  {
+    label: "Situation",
+    items: [
+      { href: "/polaris", label: "Polaris-X", icon: "globe" },
+      { href: "/osiris-cctv", label: "Public CCTV", icon: "camera" },
+      { href: "/geofence-chain", label: "Tango chains", icon: "pin" },
+    ],
+  },
+  {
     label: "Workspace",
     items: [
       { href: "/cases", label: "Cases", icon: "folder" },

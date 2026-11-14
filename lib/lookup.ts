@@ -6,6 +6,16 @@ import { investigateIp } from "./intel/ip";
 import { investigateEmail } from "./intel/email";
 import { investigateUsername } from "./intel/username";
 import { investigateTelegram } from "./intel/telegram";
+import { investigateHlr } from "./intel/hlr";
+import { investigateWhatsApp } from "./intel/whatsapp";
+import { investigateGetContact } from "./intel/getcontact";
+import { investigateEwallet } from "./intel/ewallet";
+import { investigateBreach } from "./intel/breach";
+import { investigateHumint } from "./intel/humint";
+import { investigatePublicEvidence } from "./intel/public-evidence";
+import { investigateName } from "./intel/name";
+import { investigateDomain } from "./intel/domain";
+import { investigateTelegramAnalytics } from "./intel/telegram-analytics";
 import type { ModuleResult } from "./intel/types";
 import type { User } from "./users";
 import { isIP } from "node:net";
@@ -56,10 +66,32 @@ async function dispatch(input: LookupInput): Promise<ModuleResult> {
       return investigateUsername(input.target);
     case "telegram":
       return investigateTelegram(input.target, input.keyword ?? "");
+    case "hlr":
+      return investigateHlr(input.target);
+    case "whatsapp":
+      return investigateWhatsApp(input.target);
+    case "getcontact":
+      return investigateGetContact(input.target);
+    case "ewallet":
+      return investigateEwallet(input.target);
+    case "breach":
+      return investigateBreach(input.target);
+    case "humint":
+      return investigateHumint(input.target, input.keyword ?? "");
+    case "public-evidence":
+      return investigatePublicEvidence(input.target);
+    case "name":
+      return investigateName(input.target, input.keyword ?? "");
+    case "domain":
+      return investigateDomain(input.target);
+    case "telegram-analytics":
+      return investigateTelegramAnalytics(input.target);
     default:
       throw new LookupError(400, "Unknown module");
   }
 }
+
+const PHONE_MODULES: ModuleKey[] = ["phone", "hlr", "whatsapp", "getcontact", "ewallet", "humint"];
 
 function validateTarget(module: ModuleKey, target: string): void {
   if (module === "ip" && isIP(target) === 0) throw new LookupError(400, "Invalid IP address");
@@ -69,12 +101,28 @@ function validateTarget(module: ModuleKey, target: string): void {
   if (module === "username" && !/^[a-zA-Z0-9._-]{1,64}$/.test(target.replace(/^@/, ""))) {
     throw new LookupError(400, "Invalid username");
   }
-  if (module === "telegram" && !/^[a-zA-Z][a-zA-Z0-9_]{3,31}$/.test(target.replace(/^@/, "").replace(/^https?:\/\/t\.me\/(s\/)?/, ""))) {
+  if ((module === "telegram" || module === "telegram-analytics") && !/^[a-zA-Z][a-zA-Z0-9_]{3,31}$/.test(target.replace(/^@/, "").replace(/^https?:\/\/t\.me\/(s\/)?/, ""))) {
     throw new LookupError(400, "Invalid Telegram channel");
   }
-  if (module === "phone") {
+  if (PHONE_MODULES.includes(module)) {
     const parsed = parsePhoneNumberFromString(target, "ID");
     if (!parsed || !parsed.isPossible()) throw new LookupError(400, "Invalid phone number");
+  }
+  if (module === "breach") {
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(target);
+    if (!isEmail) {
+      const parsed = parsePhoneNumberFromString(target, "ID");
+      if (!parsed || !parsed.isPossible()) throw new LookupError(400, "Provide a phone number or email address");
+    }
+  }
+  if (module === "public-evidence" && !/^\+?\d[\d\s().-]{5,}$/.test(target) && !/^@?[a-zA-Z0-9._-]{2,64}$/.test(target)) {
+    throw new LookupError(400, "Provide a phone number or handle");
+  }
+  if (module === "name" && target.trim().length < 2) {
+    throw new LookupError(400, "Name is too short");
+  }
+  if (module === "domain" && !/^(?=.{4,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(target.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))) {
+    throw new LookupError(400, "Invalid domain");
   }
 }
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { ledgerFor, costOf } from "@/lib/tokens";
 import { Icon } from "@/components/Icon";
+import { TopupPanel } from "@/components/TopupPanel";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Credits" };
@@ -12,6 +13,16 @@ const PRICES = [
   { label: "Email intelligence", module: "email" as const },
   { label: "Username sweep", module: "username" as const },
   { label: "Telegram public search", module: "telegram" as const },
+  { label: "HLR / carrier lookup", module: "hlr" as const },
+  { label: "WhatsApp registration", module: "whatsapp" as const },
+  { label: "GetContact names", module: "getcontact" as const },
+  { label: "E-wallet identity", module: "ewallet" as const },
+  { label: "Breach exposure", module: "breach" as const },
+  { label: "HUMINT records", module: "humint" as const },
+  { label: "Public evidence", module: "public-evidence" as const },
+  { label: "Name intelligence", module: "name" as const },
+  { label: "Domain intelligence", module: "domain" as const },
+  { label: "Telegram analytics", module: "telegram-analytics" as const },
 ];
 
 export default async function BillingPage() {
@@ -39,8 +50,8 @@ export default async function BillingPage() {
           <p className="mono mt-2 text-[40px] font-semibold leading-none text-brass">{user.credits}</p>
           <p className="mt-2 text-[12px] text-muted">credits</p>
           <p className="mt-5 max-w-sm text-[11.5px] leading-relaxed text-faint">
-            Top-ups are granted by an administrator in this deployment — Hamsa ships without a
-            payment processor on purpose, so no card data ever touches the box.
+            Tokens are prepaid. Buy a pack below with QRIS or USDT; the balance is credited the
+            moment the payment gateway confirms it, and every movement lands in the ledger.
           </p>
         </div>
 
@@ -59,6 +70,8 @@ export default async function BillingPage() {
           </p>
         </div>
       </section>
+
+      <TopupPanel initialBalance={user.credits} />
 
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">

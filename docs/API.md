@@ -38,9 +38,10 @@ Runs one intelligence module, charges credits, stores the result.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `module` | `phone \| ip \| email \| username \| telegram` | yes | |
+| `module` | `phone \| ip \| email \| username \| telegram \| hlr \| whatsapp \| getcontact \| ewallet \| breach \| humint \| public-evidence \| name \| domain \| telegram-analytics` | yes | |
 | `target` | string, 1–320 chars | yes | Format depends on module |
-| `keyword` | string, ≤120 | no | Telegram only |
+| `keyword` | string, ≤120 | no | Telegram modules only |
+| `location` | string, ≤120 | no | `name` module only |
 | `caseId` | string or null | no | Must belong to the caller; attaches the lookup as evidence |
 
 **Response `201`**
@@ -96,6 +97,100 @@ Runs one intelligence module, charges credits, stores the result.
 **Username** — `username`, `checked`, `foundCount`, `absentCount`, `unknownCount`, `hits[]` (`site`, `url`, `status`, `found`, `reliability`).
 
 **Telegram** — `channel`, `keyword`, `count`, `posts[]` (`id`, `url`, `datetime`, `text`).
+
+**HLR** — `resolved`, `e164`, `country`, `carrier`, `carrierSource`, `portability[]`, `provider`.
+
+**WhatsApp** — `registered`, `waId`, `link`, `provider`.
+
+**GetContact** — `names[]` (`name`, `tags[]`, `confidence`), `provider`.
+
+**E-wallet** — `accounts[]` (`provider`, `name`, `verified`, `accountHolder`), `provider`.
+
+**Breach** — `breaches[]` (`name`, `domain`, `date`, `records`, `dataClasses[]`, `source`), `checked[]`.
+
+**HUMINT** — `records[]` with provenance, `matched` count, `corpus` (files scanned).
+
+**Public evidence** — `hits[]` (`platform`, `url`, `kind`, `confidence`), `sources`.
+
+**Name** — `normalized`, `variants[]`, `matches[]`, `location`.
+
+**Domain** — `domain`, `dns{}`, `whois{}`, `http{}`, `certificates[]`, `technologies[]`.
+
+**Telegram analytics** — `channel`, `subscribers`, `growth[]`, `forwards[]`, `topPosts[]`.
+
+Modules that need a provider key return their offline/public portion plus a `warnings[]`
+entry naming the missing environment variable. A missing key is never a silent empty result.
+
+---
+
+## `POST /api/v1/graph`
+
+Builds an identity graph from stored results. Body accepts `{ target, module? }` or
+`{ lookupId }`; nodes are phones, names, accounts and breaches, edges carry a weight and
+the source module. Returns `{ nodes[], edges[], truncated }`.
+
+## `POST /api/v1/qr`
+
+`{ image: "data:image/…;base64,…" | base64 }` decodes a QR (zxing-wasm) and returns
+`{ format, text, bytes, cost }`. Encoding is local: `qrSvg()` in `lib/qr-encode.ts`
+renders any payload to inline SVG for the top-up flow and the QR tool.
+
+## `GET/POST /api/v1/topup`
+
+`GET` lists plans and the caller's top-ups. `POST {planId}` creates a pending top-up and
+returns `{ topup, instructions }`; `instructions` carries `qrPayload`/`qrSvg` for QRIS or
+`payAddress`/`network` for USDT, plus `warnings[]` when the rail is not configured.
+
+| Plan id | Provider | Tokens | Price |
+| --- | --- | --- | --- |
+| `qris-10` … `qris-300` | QRIS | 10 / 20 / 50 / 100 / 200 / 300 | Rp 40.000 … Rp 1.200.000 |
+| `usdt-50` … `usdt-300` | USDT | 50 / 100 / 200 / 300 | $12.50 / $25.00 / $50.00 / $75.00 |
+
+`GET /api/v1/topup/[reference]` reads one (owner or admin), `DELETE` cancels a pending one,
+and `POST /api/v1/topup/[reference]/settle` is admin-only. `GET /api/v1/tokens/balance`
+returns `{ balance, pendingTopups, lastPaidAt, recent[] }`.
+
+`POST /api/v1/topup/webhook` is the automated settlement path: HMAC-SHA256 over the raw
+body in `x-hamsa-signature` (hex with optional `sha256=` prefix), keyed by
+`HAMSA_TOPUP_WEBHOOK_SECRET`. Settlement is idempotent — a retried callback returns
+`alreadySettled: true` and never credits twice. Without the secret the endpoint returns
+`503 WEBHOOK_NOT_CONFIGURED`.
+
+## Auth routes (`/api/v1/auth/web/*`)
+
+| Route | Body | Notes |
+| --- | --- | --- |
+| `POST request-otp` | `{phone\|whatsapp, channel?, turnstileToken?}` | 5-minute code, max 5 attempts, old codes invalidated; returns `devCode` only in `OTP_DEV_MODE` |
+| `POST verify-otp` | `{phone\|whatsapp, code}` | Creates the account on first success, returns `sessionToken` and sets the cookie |
+| `POST login` | `{identifier\|identity, password}` | Email or phone; rejected for OTP-only accounts |
+| `POST logout` | — | Revokes the header token and clears the cookie |
+| `GET me` | — | Identity + balance + `via` |
+| `GET beta-status` | — | `{betaEnabled, registrationLimit, newBetaUsers, remainingSlots}` |
+| `POST password` | `{password}` | Authenticated; lets an OTP-only account add a password |
+
+Session-token routes accept `x-session-token`, `Authorization: Bearer`, or the cookie.
+`x-device-id` and `x-device-type` are recorded on the session when supplied.
+
+## Polaris-X (`/api/v1/osiris/*`)
+
+| Route | Returns |
+| --- | --- |
+| `POST preview/status` | Starts or reports the 5-minute preview window (`POLARIS_PREVIEW_EXPIRED` after cooldown) |
+| `GET bmkg` | BMKG earthquakes and weather warnings |
+| `GET news` | RSS headlines from Indonesian outlets |
+| `GET aviation/opensky`, `aviation/adsb` | Aircraft states |
+| `GET aviation/satellites` | Celestrak TLE-derived positions |
+| `GET cctv` | Catalogue status for every city |
+| `GET cctv/[city]/catalog` | One city's camera entries |
+| `GET cctv/[city]/[id]/frame` | Latest frame, only when `HAMSA_PUBLIC_CCTV_<SLUG>` is set |
+
+## Geofence chains (`/api/v1/geofint/*`)
+
+`POST token` mints a 15-minute HMAC token for the public collection page. `POST chains`
+creates a chain (label, TTL), `GET chains` lists the caller's, `GET chains/[code]` reads one
+(owner or admin), `POST chains/[code]/reports` accepts a public report, `DELETE
+chains/[code]/reports` wipes every report on the chain, and `POST chains/[code]/preview`
+extracts EXIF GPS from an uploaded still. Public page: `/t/[code]`.
 
 ---
 
@@ -224,13 +319,21 @@ Unauthenticated liveness probe. Returns `{"status":"ok","database":"reachable","
 | Path | Purpose |
 | --- | --- |
 | `/` | Dashboard: balance, activity sparkline, module mix |
-| `/lookup/{phone,ip,email,username,telegram}` | Interactive console |
+| `/lookup/{phone,ip,email,username,telegram}` | Core interactive consoles |
+| `/lookup/{hlr,whatsapp,getcontact,ewallet,breach,humint,public-evidence,name,domain,telegram-analytics}` | Phone-pivot and identity consoles |
+| `/tools/qr` | QR decode and encode |
+| `/graph` | Identity link graph |
+| `/polaris` | Polaris-X situational dashboard |
+| `/osiris-cctv` | Public CCTV catalogue |
+| `/geofence-chain` | Tango chain management |
+| `/t/[code]` | Public chain collection page (no login) |
 | `/cases`, `/cases/[id]` | Dossiers and evidence |
 | `/history`, `/history/[id]`, `/history/[id]/print` | Records and exports |
 | `/watchlist` | Scheduled monitoring |
 | `/tracking` | Consent devices, tokens and geofences |
 | `/cctv` | Own-asset camera monitor |
 | `/notifications` | Camera alerts and geofence transitions |
-| `/billing` | Ledger and price list |
+| `/billing` | Ledger, price list and token top-ups |
 | `/settings` | Password, API keys, sessions |
 | `/admin` | Operators, providers, audit trail |
+| `/login`, `/register` | OTP/password sign-in and access request |

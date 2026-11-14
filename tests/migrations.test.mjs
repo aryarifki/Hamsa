@@ -32,6 +32,24 @@ const count = async (table) => {
 const tableExists = async (table) =>
   (await db.one("SELECT to_regclass(?) AS oid", table))?.oid !== null;
 
+const columnExists = async (table, column) =>
+  Boolean(
+    await db.one(
+      `SELECT 1 AS present FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
+      table,
+      column,
+    ),
+  );
+
+const ALL_MIGRATIONS = [
+  "001_notifications",
+  "002_camera_monitor",
+  "003_consent_geofencing",
+  "004_phonex_parity_auth",
+  "005_geofence_chains",
+];
+
 async function seedV1() {
   await db.exec(SCHEMA);
 
@@ -110,7 +128,7 @@ test("v1 database upgrades without losing devices, pings, fences or cameras", as
   await seedV1();
 
   const applied = await applyMigrations(db);
-  assert.deepEqual(applied, ["001_notifications", "002_camera_monitor", "003_consent_geofencing"]);
+  assert.deepEqual(applied, ALL_MIGRATIONS);
 
   assert.equal(await count("tracked_devices"), 2);
   assert.equal(await count("device_locations"), 3);
@@ -144,6 +162,16 @@ test("v1 database upgrades without losing devices, pings, fences or cameras", as
 });
 
 test("down migrations restore the v1 structure and rows", async () => {
+  assert.equal(await rollbackLast(db), "005_geofence_chains");
+  assert.equal(await tableExists("geofence_chains"), false);
+  assert.equal(await tableExists("geofence_reports"), false);
+
+  assert.equal(await rollbackLast(db), "004_phonex_parity_auth");
+  assert.equal(await tableExists("otp_codes"), false);
+  assert.equal(await tableExists("topups"), false);
+  assert.equal(await columnExists("users", "phone"), false);
+  assert.equal(await columnExists("sessions", "device_id"), false);
+
   assert.equal(await rollbackLast(db), "003_consent_geofencing");
   assert.equal(await count("devices"), 2);
   assert.equal(await count("device_pings"), 3);
@@ -168,7 +196,7 @@ test("down migrations restore the v1 structure and rows", async () => {
 
 test("up again after a full rollback recreates and re-copies everything", async () => {
   const applied = await applyMigrations(db);
-  assert.deepEqual(applied, ["001_notifications", "002_camera_monitor", "003_consent_geofencing"]);
+  assert.deepEqual(applied, ALL_MIGRATIONS);
 
   assert.equal(await count("tracked_devices"), 2);
   assert.equal(await count("device_locations"), 3);

@@ -8,8 +8,26 @@ import { InsufficientCreditsError } from "@/lib/tokens";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MODULES = [
+  "phone",
+  "ip",
+  "email",
+  "username",
+  "telegram",
+  "hlr",
+  "whatsapp",
+  "getcontact",
+  "ewallet",
+  "breach",
+  "humint",
+  "public-evidence",
+  "name",
+  "domain",
+  "telegram-analytics",
+] as const;
+
 const bodySchema = z.object({
-  module: z.enum(["phone", "ip", "email", "username", "telegram"]),
+  module: z.enum(MODULES),
   target: z.string().trim().min(1).max(320),
   keyword: z.string().trim().max(120).optional(),
   caseId: z.string().nullish(),

@@ -224,6 +224,7 @@ export async function resetDatabase(): Promise<void> {
     TRUNCATE TABLE
       notifications, camera_events, camera_snapshots, cameras,
       geofence_events, device_locations, geofences, tracked_devices,
+      geofence_reports, geofence_chains, topups, otp_codes,
       watchlist, api_keys, case_items, cases, lookups, ledger, sessions,
       audit_log, providers, settings, telegram_sources, users
     RESTART IDENTITY CASCADE;

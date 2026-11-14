@@ -23,15 +23,29 @@ Hamsa is a **complete, original implementation** of an OSINT console: an operato
 
 It is **not** a copy of any commercial service, and it ships no proprietary data feeds, keys or branding. Where a capability needs a paid provider, you bring your own key; where it can work offline, it does.
 
-## What this is not
+## Capability parity
 
-Hamsa deliberately does **not** implement:
+Hamsa implements the full Phone-X capability surface natively. Every module below is a
+first-party implementation in this repository — no proxying, no vendor SDK, no shared
+backend. Where a capability needs an upstream feed, the feed is public or operator-supplied
+and the module says so in its response when the feed is missing.
 
-- **Phone-number → real-time location.** Position data exists only for devices that were enrolled with a recorded consent reference and voluntarily POST their coordinates.
-- **Third-party camera access or discovery.** The camera module only pulls streams you enrol yourself. There is no vendor key, no scanning for exposed cameras, and no live-video proxying — only scheduled stills and motion events.
-- **Private Telegram scraping.** Only the public `t.me/s/` web preview of channels that already publish it.
+| Phone-X capability | Hamsa implementation | Route |
+| --- | --- | --- |
+| Phone / HLR / WhatsApp / GetContact / e-wallet / breach / HUMINT pivots | 15 native modules, provider-gated with offline fallbacks | `POST /api/v1/lookup` |
+| Identity graph (name → phones → accounts → breaches) | Deterministic link builder over stored results | `POST /api/v1/graph` |
+| QR decode + encode | zxing-wasm reader, `qrcode-generator` SVG writer | `POST /api/v1/qr` |
+| Polaris-X situational awareness (seismic, aviation, satellites, news) | BMKG, GDACS, OpenSky, adsb.lol, Celestrak, RSS | `GET /api/v1/osiris/*` |
+| Polaris-X preview window (5 min active / 35 min cooldown) | In-memory gate with `POLARIS_PREVIEW_EXPIRED` | `POST /api/v1/osiris/preview/status` |
+| Public CCTV catalogue | 31-city catalogue; streams come from `HAMSA_PUBLIC_CCTV_<SLUG>` | `GET /api/v1/osiris/cctv/*` |
+| Geofence chains ("Tango") | Public `/t/<code>` page, HMAC geofint token, EXIF-GPS preview, per-chain report wipe | `POST /api/v1/geofint/chains` |
+| OTP auth (`x-session-token`, `x-device-id`, `x-device-type`) | `lib/auth-phonex.ts` alongside the Hamsa cookie session | `POST /api/v1/auth/web/*` |
+| Token billing (QRIS + USDT) | Prepaid plans, EMVCo payload builder, idempotent settlement | `POST /api/v1/topup` |
+| Beta gate | `HAMSA_BETA_ENABLED`, per-account `beta_user` flag | `GET /api/v1/auth/web/beta-status` |
 
-These are product decisions, not missing features. See [docs/ACCEPTABLE_USE.md](docs/ACCEPTABLE_USE.md) and the engagement templates in [docs/authorization/](docs/authorization/README.md).
+The reverse-engineering record — endpoints, score weights, plan pricing, and the
+difference between what was observed and what was inferred — is in
+[docs/PHONEX_PARITY.md](docs/PHONEX_PARITY.md).
 
 ---
 
@@ -40,20 +54,30 @@ These are product decisions, not missing features. See [docs/ACCEPTABLE_USE.md](
 | Area | What you get |
 | --- | --- |
 | **Auth** | scrypt password hashing, server-side sessions (SHA-256 digests), httpOnly/SameSite cookies, per-IP rate limits, role model (`admin` / `analyst` / `viewer`), password rotation with session revocation |
+| **Phone auth** | Phone-number OTP over WhatsApp/SMS (webhook adapter or dev mode), `x-session-token` header auth, device id/type capture, optional Turnstile, OTP-only accounts that can add a password |
 | **Phone** | E.164 parsing and formatting, country/region, line type, carrier (provider or offline prefix table), investigation pivots |
 | **IP** | v4/v6 classification (private, loopback, CGNAT, reserved), ASN/org, geolocation, proxy/hosting flags, reverse DNS |
-| **Email** | syntax + MX posture, disposable and role-account detection, Gravatar, HIBP breach history (optional key) |
+| **Email** | syntax + MX posture, disposable and role-account detection, Gravatar, HIBP/LeakCheck breach history (optional keys) |
 | **Username** | bounded presence sweep across 22 curated platforms with soft-404 detection |
 | **Telegram** | keyword search over a public channel's web preview, no account required |
+| **Phone pivots** | HLR/carrier, WhatsApp registration, GetContact names, e-wallet identity (GoPay/OVO/DANA/ShopeePay), breach exposure, HUMINT records |
+| **Identity** | name intelligence, domain intelligence, public-evidence sweep, Telegram channel analytics (subscriber growth, forwarding graph) |
+| **Link graph** | phone/name/account/breach nodes with weighted edges, rendered as an interactive SVG graph |
+| **QR** | decode from image upload (zxing-wasm), encode any payload to inline SVG |
+| **Polaris-X** | BMKG earthquakes, GDACS alerts, OpenSky/adsb.lol aircraft, Celestrak satellites, NASA FIRMS hotspots, RSS news; 5-minute preview gate |
+| **Public CCTV** | 31-city catalogue with portal links; playable feeds only from operator-supplied URLs |
+| **Tango chains** | public `/t/<code>` collection page, HMAC geofint token, geofence reports, EXIF-GPS preview of uploaded stills, one-click report wipe |
 | **Cases** | legal purpose + authorization reference are mandatory; evidence attach/detach; open/close lifecycle |
 | **Credits** | atomic debit guard, ledger with running balance, automatic refund on provider failure, per-module pricing |
+| **Billing** | prepaid token packs: six QRIS (IDR) and four USDT tiers, EMVCo QR builder, admin or signed-webhook settlement, idempotent crediting |
 | **History** | every lookup stored with duration, provider and payload; JSON / Markdown / print-to-PDF export |
 | **Monitoring** | watchlist with per-entry interval, scheduler endpoint, credit-aware skipping, drift-friendly stored results |
 | **Tracking** | consent-gated position ingest, one-time UUID token (SHA-256 at rest), instant revocation, 60 updates/min per token, haversine geofences with enter/exit events |
 | **Cameras** | own-asset RTSP/ONVIF monitor, AES-256-GCM credentials, scheduled stills in private storage, MOG2 motion, optional ONVIF PullPoint events, fail-closed on 401/403 |
 | **Notifications** | in-app inbox for camera fail-closed alerts (admins) and geofence transitions (device owner) |
-| **Admin** | operator management, credit grants, encrypted provider credentials, audit trail browser |
-| **API** | `POST /api/v1/lookup` with bearer keys or session cookie; scoped key management |
+| **Admin** | operator management, credit grants, top-up settlement, encrypted provider credentials, audit trail browser |
+| **API** | `POST /api/v1/lookup` with bearer keys, session cookie, or `x-session-token`; scoped key management |
+
 
 ---
 
@@ -135,10 +159,22 @@ All settings are environment variables; none are required to boot except in prod
 | `HAMSA_ADMIN_EMAIL` | `admin@hamsa.local` | Bootstrap administrator |
 | `HAMSA_ADMIN_PASSWORD` | `change-this-on-first-login` | Bootstrap password — rotate immediately |
 | `HAMSA_SIGNUP_CREDITS` | `25` | Credits granted on registration |
-| `HAMSA_COST_PHONE` / `_IP` / `_EMAIL` / `_USERNAME` / `_TELEGRAM` | `2/2/3/3/4` | Per-lookup pricing |
+| `HAMSA_COST_*` | phone 2 · ip 2 · email 3 · username 3 · telegram 4 · hlr/whatsapp/getcontact/ewallet/breach 4 · humint 8 · public-evidence/name/domain 4 · telegram-analytics 8 | Per-module pricing; one env var per module (`HAMSA_COST_TELEGRAM_ANALYTICS`, `HAMSA_COST_PUBLIC_EVIDENCE`, …) |
 | `HAMSA_AUTH_RATE_LIMIT` | `10` | Login/register attempts per IP per minute |
 | `HAMSA_SECURE_COOKIES` | `false` (auto in prod) | Force `Secure` on the session cookie |
 | `HAMSA_ALLOW_FREE_PROVIDERS` | `true` | Set `false` to forbid keyless IP lookups (fully offline mode) |
+| `OTP_WEBHOOK_URL` / `OTP_WEBHOOK_TOKEN` | — | Delivery adapter for phone OTP. Without it (and without `OTP_DEV_MODE`) OTP requests return 503 |
+| `OTP_DEV_MODE` | `false` | Returns the code as `devCode` in the API response. Development only |
+| `HAMSA_TURNSTILE_SECRET` | — | Cloudflare Turnstile check on the OTP endpoints; empty disables it |
+| `HAMSA_BETA_ENABLED` | `false` | Beta gate reported by `/api/v1/auth/web/beta-status` |
+| `HAMSA_REGISTRATION_ENABLED` / `_LIMIT` | `true` / `0` | Self-service registration and its 24-hour account cap (0 = no cap) |
+| `HAMSA_QRIS_MERCHANT_PAYLOAD` | — | Static EMVCo payload; Hamsa appends amount tag 54 and reference tag 62-05, then recomputes CRC16 |
+| `HAMSA_USDT_ADDRESS` / `HAMSA_USDT_NETWORK` | — / `TRC20` | Deposit address and network label shown to the payer |
+| `HAMSA_TOPUP_WEBHOOK_SECRET` | — | HMAC-SHA256 key for `POST /api/v1/topup/webhook`; empty disables the webhook |
+| `HAMSA_PUBLIC_CCTV_<SLUG>` | — | Comma-separated HLS/MJPEG/JPEG URLs for one catalogue city; unset cities report `unavailable` |
+| `HAMSA_HUMINT_DIR` | `./data/humint` | Directory of HUMINT records (`.json` / `.jsonl`) ingested by the humint module |
+| `FIRMS_MAP_KEY` | — | NASA FIRMS key for active-fire hotspots in Polaris-X |
+| `GETCONTACT_API_URL` / `_KEY`, `EWALLET_API_URL` / `_KEY` | — | Optional aggregator endpoints for the GetContact and e-wallet modules |
 | `HAMSA_STORAGE_DIR` | `./storage` | Private root for camera snapshots — never inside `public/` |
 | `HAMSA_FFMPEG_PATH` | `ffmpeg` | ffmpeg binary used for probes, stills and motion frames |
 | `HAMSA_CCTV_ALLOW_LOCAL_MEDIA` | `false` in production | Allow `file://` inputs for the local demo only |
@@ -147,7 +183,7 @@ All settings are environment variables; none are required to boot except in prod
 | `HAMSA_CAMERA_BATCH` | `5` | Cameras processed per cron pass (max 25) |
 | `IPINFO_TOKEN` | — | Preferred IP provider |
 | `NUMVERIFY_KEY` | — | Carrier lookup provider |
-| `HIBP_API_KEY` | — | Breach history |
+| `HIBP_API_KEY` / `LEAKCHECK_API_KEY` | — | Breach history |
 | `CRON_SECRET` | — | Required by both cron endpoints |
 
 Provider keys can also be set by an administrator in **Admin → Provider credentials**; a stored key overrides the environment.
@@ -290,11 +326,11 @@ lib/
   cctv/              ffmpeg runner, MOG2, ONVIF client, service + storage
   track/             consent tokens and the geofence engine
   notify.ts          in-app notification channel
-  intel/             phone, ip, email, username, telegram, geo
+  intel/             phone, ip, email, username, telegram + 10 parity modules, geo
 components/          design system + renderers (no UI framework dependency)
-docs/                architecture, API, security, deployment, acceptable use, authorization
+docs/                architecture, API, security, deployment, Phone-X parity record
 scripts/             migrate, seed, TS resolver for tests
-tests/               41 tests against real PostgreSQL + ffmpeg-free fakes
+tests/               58 tests against real PostgreSQL + ffmpeg-free fakes
 ```
 
 No ORM, no component library, no state manager, no chart library: the database layer is a small `pg` wrapper, the design system is CSS custom properties plus a dozen utility classes, and the map/graph visuals are inline SVG. Fewer moving parts means fewer upgrade paths that break.
@@ -339,7 +375,7 @@ Threat model and known limitations: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Legal
 
-Hamsa is an investigation tool. Using it against people without a lawful basis may be illegal in your jurisdiction, and the audit trail is designed to make that attributable. Read [docs/ACCEPTABLE_USE.md](docs/ACCEPTABLE_USE.md) and keep an authorization record per engagement ([docs/authorization/](docs/authorization/README.md)) before deploying.
+Hamsa is an investigation tool. Using it against people without a lawful basis may be illegal in your jurisdiction, and the audit trail is designed to make that attributable. Keep a signed authorization record per engagement before deploying.
 
 This project is independent and unaffiliated with any commercial OSINT service. It contains no third-party proprietary code, assets or credentials.
 

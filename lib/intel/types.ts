@@ -12,9 +12,27 @@ export interface Signal {
   detail?: string;
 }
 
+/** Every module id, used for billing, history and API routing. */
+export type ModuleKey =
+  | "phone"
+  | "ip"
+  | "email"
+  | "username"
+  | "telegram"
+  | "hlr"
+  | "whatsapp"
+  | "getcontact"
+  | "ewallet"
+  | "breach"
+  | "humint"
+  | "public-evidence"
+  | "name"
+  | "domain"
+  | "telegram-analytics";
+
 export interface ModuleResult {
   /** Machine-readable module id, used for billing and history. */
-  module: "phone" | "ip" | "email" | "username" | "telegram";
+  module: ModuleKey;
   target: string;
   /** Wall-clock duration of the enrichment. */
   durationMs: number;

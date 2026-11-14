@@ -491,7 +491,129 @@ const tracking: Migration = {
   },
 };
 
-export const MIGRATIONS: Migration[] = [notifications, cameras, tracking];
+/* ───────────────────────── 004 · Phone-X parity auth ───────────────────────── */
+
+const phonexAuth: Migration = {
+  id: "004_phonex_parity_auth",
+  dataLoss:
+    "OTP codes and top-up records are dropped on rollback; phone-based accounts keep their synthesized email address.",
+  async up(db) {
+    await db.exec(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS requires_password INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_user INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_id TEXT;
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_type TEXT;
+    `);
+
+    await db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS otp_codes (
+        id          TEXT PRIMARY KEY,
+        phone       TEXT NOT NULL,
+        code_hash   TEXT NOT NULL,
+        channel     TEXT NOT NULL DEFAULT 'whatsapp',
+        purpose     TEXT NOT NULL DEFAULT 'login',
+        attempts    INTEGER NOT NULL DEFAULT 0,
+        consumed_at TIMESTAMPTZ,
+        expires_at  TIMESTAMPTZ NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL,
+        ip          TEXT,
+        user_agent  TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS topups (
+        id            TEXT PRIMARY KEY,
+        user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider      TEXT NOT NULL,
+        tokens        INTEGER NOT NULL,
+        amount_idr    INTEGER,
+        amount_usd    NUMERIC(12, 2),
+        status        TEXT NOT NULL DEFAULT 'pending',
+        reference     TEXT NOT NULL UNIQUE,
+        qr_payload    TEXT,
+        pay_address   TEXT,
+        created_at    TIMESTAMPTZ NOT NULL,
+        expires_at    TIMESTAMPTZ,
+        paid_at       TIMESTAMPTZ,
+        settled_by    TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_topups_user ON topups(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_topups_status ON topups(status);
+    `);
+  },
+
+  async down(db) {
+    await db.exec(`
+      DROP TABLE IF EXISTS topups;
+      DROP TABLE IF EXISTS otp_codes;
+      DROP INDEX IF EXISTS idx_users_phone;
+      ALTER TABLE sessions DROP COLUMN IF EXISTS device_type;
+      ALTER TABLE sessions DROP COLUMN IF EXISTS device_id;
+      ALTER TABLE users DROP COLUMN IF EXISTS beta_user;
+      ALTER TABLE users DROP COLUMN IF EXISTS requires_password;
+      ALTER TABLE users DROP COLUMN IF EXISTS phone_verified_at;
+      ALTER TABLE users DROP COLUMN IF EXISTS gmail;
+      ALTER TABLE users DROP COLUMN IF EXISTS whatsapp;
+      ALTER TABLE users DROP COLUMN IF EXISTS phone;
+    `);
+  },
+};
+
+/* ─────────────────────────── 005 · geofence chains ─────────────────────────── */
+
+const geofenceChains: Migration = {
+  id: "005_geofence_chains",
+  dataLoss: "Shareable geofence chains and the reports submitted through them are dropped on rollback.",
+  async up(db) {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS geofence_chains (
+        id         TEXT PRIMARY KEY,
+        code       TEXT NOT NULL UNIQUE,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        label      TEXT NOT NULL,
+        active     INTEGER NOT NULL DEFAULT 1,
+        views      INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL,
+        expires_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_geofence_chains_user ON geofence_chains(user_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS geofence_reports (
+        id         TEXT PRIMARY KEY,
+        chain_id   TEXT NOT NULL REFERENCES geofence_chains(id) ON DELETE CASCADE,
+        lat        DOUBLE PRECISION NOT NULL,
+        lng        DOUBLE PRECISION NOT NULL,
+        accuracy   DOUBLE PRECISION,
+        note       TEXT,
+        ip         TEXT,
+        user_agent TEXT,
+        at         TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_geofence_reports_chain ON geofence_reports(chain_id, at DESC);
+    `);
+  },
+
+  async down(db) {
+    await db.exec(`
+      DROP TABLE IF EXISTS geofence_reports;
+      DROP TABLE IF EXISTS geofence_chains;
+    `);
+  },
+};
+
+export const MIGRATIONS: Migration[] = [
+  notifications,
+  cameras,
+  tracking,
+  phonexAuth,
+  geofenceChains,
+];
 
 export interface MigrationStatus {
   id: string;

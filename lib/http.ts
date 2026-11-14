@@ -59,6 +59,10 @@ export interface AuthContext {
 /**
  * Accepts either the browser session cookie or a bearer API key (`hk_...`).
  * API keys are hashed with SHA-256 at rest and compared by digest.
+ *
+ * A third path exists for Phone-X parity: `x-session-token` carrying a session
+ * token issued by `/api/v1/auth/verify-otp`. That token is the same secret the
+ * cookie holds, so it resolves against the same `sessions` rows.
  */
 export async function authenticate(req: Request | NextRequest): Promise<AuthContext | null> {
   const header = req.headers.get("authorization");
@@ -81,8 +85,36 @@ export async function authenticate(req: Request | NextRequest): Promise<AuthCont
     return null;
   }
 
-  const user = await currentUser();
-  return user ? { user, via: "session" } : null;
+  const sessionToken = req.headers.get("x-session-token")?.trim();
+  if (sessionToken) {
+    const user = await userForSessionToken(sessionToken);
+    if (user) return { user, via: "session" };
+  }
+
+  // `cookies()` needs a request scope. Falling through here from a script or a
+  // test must not throw; outside a request there simply is no cookie session.
+  try {
+    const user = await currentUser();
+    return user ? { user, via: "session" } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolves a raw session token (cookie value or `x-session-token`) to a user. */
+export async function userForSessionToken(token: string): Promise<User | null> {
+  if (!token) return null;
+  const row = await one<{ user_id: string; expires_at: string; revoked_at: string | null }>(
+    "SELECT user_id, expires_at, revoked_at FROM sessions WHERE id = ?",
+    sha256(token),
+  );
+  if (!row || row.revoked_at) return null;
+  if (Date.parse(row.expires_at) <= Date.now()) return null;
+  const user = await one<User>(
+    "SELECT id, email, name, role, status, credits, created_at, last_login_at FROM users WHERE id = ?",
+    row.user_id,
+  );
+  return user && user.status === "active" ? user : null;
 }
 
 export async function requireAuth(req: Request | NextRequest): Promise<AuthContext> {

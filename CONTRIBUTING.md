@@ -35,8 +35,6 @@ All three must pass. The suite runs against a real PostgreSQL database and must 
 - **A documentation fix.** If the README lies, that is a bug.
 - **A security improvement** with a note in `docs/SECURITY.md` describing the threat it addresses.
 
-Authorization records and scope templates live in [`docs/authorization/`](docs/authorization/README.md).
-
 ## Code style
 
 - TypeScript strict mode, no `any` in new code. `unknown` plus a narrowing check is fine.

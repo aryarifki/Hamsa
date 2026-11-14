@@ -1,18 +1,29 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { historyFor } from "@/lib/lookup";
-import { Icon } from "@/components/Icon";
+import { Icon, type IconName } from "@/components/Icon";
+import type { ModuleKey } from "@/lib/intel/types";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "History" };
 
-const MODULE_ICON = {
+const MODULE_ICON: Record<ModuleKey, IconName> = {
   phone: "phone",
   ip: "globe",
   email: "mail",
   username: "at",
   telegram: "send",
-} as const;
+  hlr: "phone",
+  whatsapp: "send",
+  getcontact: "users",
+  ewallet: "card",
+  breach: "alert",
+  humint: "eye",
+  "public-evidence": "eye",
+  name: "users",
+  domain: "globe",
+  "telegram-analytics": "send",
+};
 
 export default async function HistoryPage() {
   const user = await requireUser();

@@ -2,6 +2,51 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-11-14
+
+Phone-X capability parity: native intelligence modules, Polaris-X, public CCTV, Tango chains, OTP auth and token billing.
+
+### Added
+
+**Intelligence modules (15 total, all under `POST /api/v1/lookup`)**
+- `hlr`, `whatsapp`, `getcontact`, `ewallet`, `breach`, `humint`, `public-evidence`, `name`, `domain`, `telegram-analytics` alongside `phone`, `ip`, `email`, `username`, `telegram`.
+- Provider-gated: each module falls back to offline/public data and returns `warnings` describing what was missing instead of failing silently.
+- Link graph (`POST /api/v1/graph`, `/graph` page) with weighted identity edges.
+- QR tool (`POST /api/v1/qr`, `/tools/qr`): zxing-wasm decode plus inline-SVG encode via `qrcode-generator`.
+
+**Polaris-X**
+- BMKG earthquakes, GDACS alerts, OpenSky and adsb.lol aircraft, Celestrak satellites, NASA FIRMS hotspots, RSS news (`GET /api/v1/osiris/*`).
+- Anonymous preview gate: 5 minutes active, 35 minutes cooldown, `POLARIS_PREVIEW_EXPIRED`.
+
+**Public CCTV**
+- 31-city catalogue with portal links; playable HLS/MJPEG/JPEG streams come from `HAMSA_PUBLIC_CCTV_<SLUG>`. Unset cities report `unavailable` with the reason.
+
+**Geofence chains ("Tango")**
+- Public `/t/<code>` collection page, HMAC geofint token, chain lifecycle and revocation, per-chain report wipe.
+- Preview of uploaded stills reads EXIF GPS (JPEG/TIFF, RATIONAL 8-byte fix) and reports `found:false` when the image carries none.
+
+**Phone OTP auth**
+- `/api/v1/auth/web/{request-otp,verify-otp,login,logout,me,beta-status,password}` with `x-session-token`, `x-device-id` and `x-device-type`, alongside the existing cookie session.
+- OTP delivery through `OTP_WEBHOOK_URL`/`OTP_WEBHOOK_TOKEN`, `OTP_DEV_MODE` for development, optional Cloudflare Turnstile.
+- OTP-only accounts are created on first verification and can add a password later.
+
+**Token billing**
+- Six QRIS packs (Rp 40.000–1.200.000) and four USDT packs ($12.50–$75.00).
+- Dynamic EMVCo payload builder (tag 54 amount, tag 62-05 reference, CRC16) from `HAMSA_QRIS_MERCHANT_PAYLOAD`; USDT deposits via `HAMSA_USDT_ADDRESS`/`HAMSA_USDT_NETWORK`.
+- Idempotent settlement through an admin action or an HMAC-signed webhook; expiry committed outside the settlement transaction.
+
+### Changed
+
+- `users` gains `phone`, `whatsapp`, `gmail`, `phone_verified_at`, `requires_password`, `beta_user`; `sessions` gains `device_id`/`device_type`; new `otp_codes` and `topups` tables (migration `004`).
+- New `geofence_chains` and `geofence_reports` tables (migration `005`).
+- `authenticate()` accepts `x-session-token` in addition to cookies and bearer keys.
+- Billing page lists all 15 modules and hosts the QRIS/USDT top-up panel.
+- README and `docs/SECURITY.md` document the parity surface and deployment trust boundaries.
+
+### Tests
+
+- 58 tests, including 14 parity tests: OTP lifecycle and lockout, session-token auth, password login, idempotent settlement, expiry, plan pricing, QRIS warning, chain ownership/revocation, EXIF GPS round-trip and base64 decoding.
+
 ## [1.1.0] — 2026-10-22
 
 PostgreSQL, own-asset camera monitoring and consent-based geofencing.
@@ -32,7 +77,7 @@ PostgreSQL, own-asset camera monitoring and consent-based geofencing.
 **Workspace**
 - In-app notifications page with unread badge for camera alerts and geofence transitions.
 - `npm run migrate` CLI (`up`, `down`, `status`), reversible down migrations and `tests/migrations.test.mjs` covering the full chain.
-- Authorization templates in `docs/authorization/`.
+- Authorization reference is mandatory on every case and is recorded in the audit trail.
 
 ### Security
 

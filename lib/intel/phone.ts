@@ -7,7 +7,7 @@ import type { ModuleResult, Signal, SourceRef } from "./types";
  * tool). Prefixes are the national significant number without the trunk "0".
  * Only used when no carrier provider is configured — provider answers win.
  */
-const ID_CARRIERS: Array<[RegExp, string]> = [
+export const ID_CARRIERS: Array<[RegExp, string]> = [
   [/^81[123]/, "Telkomsel"],
   [/^82[123]/, "Telkomsel"],
   [/^85[123]/, "Telkomsel"],

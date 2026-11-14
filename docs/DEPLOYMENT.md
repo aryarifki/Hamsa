@@ -29,6 +29,8 @@ CRON_SECRET=<openssl rand -hex 24>
 
 `HAMSA_SECRET` encrypts provider keys and camera passwords. **Losing it means those secrets are unrecoverable** — the database stays readable, but stored credentials must be re-entered. Back it up separately from the database.
 
+Phone OTP sign-in needs a delivery adapter — set `OTP_WEBHOOK_URL` and `OTP_WEBHOOK_TOKEN`, or `OTP_DEV_MODE=true` on a development box only. Without either, OTP requests return `503`; password and cookie sessions keep working. Token top-ups need `HAMSA_QRIS_MERCHANT_PAYLOAD` and/or `HAMSA_USDT_ADDRESS`, plus `HAMSA_TOPUP_WEBHOOK_SECRET` for automated settlement. Public CCTV feeds are opt-in per city via `HAMSA_PUBLIC_CCTV_<SLUG>`; unset cities stay listed as `unavailable`. See `.env.example` for the full set.
+
 The app applies the baseline schema and every pending migration on boot, guarded by a PostgreSQL advisory lock so several workers cannot race. You can also run migrations explicitly (see below).
 
 ## Docker Compose (recommended)
@@ -146,7 +148,7 @@ npm run migrate up       # apply everything (also happens on boot)
 npm run migrate down     # roll back the most recent migration
 ```
 
-The `down` command prints the migration's `dataLoss` note. In particular, rolling back `002_camera_monitor` restores `cctv_assets` and keeps credentials, but drops snapshot/event history; rolling back `003_consent_geofencing` restores `devices`/`device_pings` and the old fence shape, but drops org-wide fences (`device_id IS NULL`) and notification rows.
+The `down` command prints the migration's `dataLoss` note. In particular, rolling back `005_geofence_chains` drops chain reports and chains; rolling back `004_phonex_parity_auth` drops `otp_codes` and `topups` and removes the phone/session columns; rolling back `002_camera_monitor` restores `cctv_assets` and keeps credentials, but drops snapshot/event history; rolling back `003_consent_geofencing` restores `devices`/`device_pings` and the old fence shape, but drops org-wide fences (`device_id IS NULL`) and notification rows.
 
 All migrations run inside a transaction. Take a backup before any `down` in production.
 

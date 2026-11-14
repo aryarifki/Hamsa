@@ -33,7 +33,10 @@ Server Components read the database directly — there is no internal HTTP hop b
 | `crypto.ts` | scrypt, AES-256-GCM, tokens | Secrets are never logged or returned unmasked |
 | `users.ts` | Credentials and user records | Free of `next/*` imports so it is unit-testable |
 | `auth.ts` | Session lifecycle, `requireUser`, `requireAdmin`, `requireOperator` | Cookie is httpOnly + SameSite=Lax; DB stores only a digest |
+| `auth-phonex.ts` | Phone OTP, password login, `x-session-token` sessions | Codes are hashed, single-use, 5-minute TTL, 5 attempts; OTP-only accounts get a synthetic email |
 | `tokens.ts` | Credit ledger | Debit is a conditional `UPDATE … WHERE credits >= ?` |
+| `tokens-phonex.ts` | QRIS/USDT top-ups, plans, settlement | Settlement is a single guarded `UPDATE`; expiry is committed outside the tx |
+| `qr-encode.ts` | QR encoder (`qrcode-generator`) | Pure function; returns inline SVG or null |
 | `lookup.ts` | Orchestration | Charge → persist → dispatch → persist → audit; refund on throw |
 | `audit.ts` | Append-only trail | Never throws into the request path |
 | `notify.ts` | In-app inbox | Camera alerts go to admins; geofence notices to the owner |
@@ -43,9 +46,14 @@ Server Components read the database directly — there is no internal HTTP hop b
 | `cctv/onvif.ts` | SOAP PullPoint client with an injectable transport | WS-Security digest; PullPoint only |
 | `cctv/service.ts` | Enrolment, checks, capture, fail-closed, cron pass, pruning | Credentials split from URL and encrypted; auth failure disables |
 | `cctv/storage.ts` | Private snapshot paths | Path validated under the storage root before read/write |
+| `cctv/public-feeds.ts` | 31-city public CCTV catalogue and frame capture | Streams come from `HAMSA_PUBLIC_CCTV_<SLUG>`; no portal scraping |
 | `track/consent.ts` | Token mint/hash/revoke, ownership queries | Plaintext token is returned once; digest only at rest |
 | `track/geofence.ts` | Haversine evaluation, transition state, location ingest | Previous transition is the latest event; no duplicates |
+| `track/chain.ts` | Tango geofence chains and public reports | Codes are 8 chars from a 32-symbol alphabet; owner-scoped reads |
+| `track/geofence-preview.ts` | EXIF GPS extraction from uploaded stills | Returns `found:false` instead of guessing; RATIONAL is 8 bytes |
 | `intel/*` | One module per data domain | Each returns a uniform `ModuleResult` |
+| `intel/preview.ts` | Polaris-X preview window | 5 minutes active, 35 minutes cooldown, in-memory per process |
+| `intel/situational.ts` | Public feeds (BMKG, GDACS, OpenSky, Celestrak, FIRMS, RSS) | Every fetch is bounded by a timeout and reports its source |
 
 Every intelligence module returns the same shape:
 
@@ -53,7 +61,7 @@ Every intelligence module returns the same shape:
 { module, target, durationMs, sources[], signals[], data{}, warnings? }
 ```
 
-That is what makes one generic renderer (`components/DataView.tsx`) enough for five very different payloads, and why adding a module does not require touching the UI.
+That is what makes one generic renderer (`components/DataView.tsx`) enough for fifteen very different payloads, and why adding a module does not require touching the UI.
 
 ### Data — PostgreSQL
 

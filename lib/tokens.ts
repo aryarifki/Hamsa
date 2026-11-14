@@ -11,7 +11,8 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
-export type ModuleKey = "phone" | "ip" | "email" | "username" | "telegram";
+export type { ModuleKey } from "./intel/types";
+import type { ModuleKey } from "./intel/types";
 
 const COST_ENV: Record<ModuleKey, string> = {
   phone: "HAMSA_COST_PHONE",
@@ -19,6 +20,16 @@ const COST_ENV: Record<ModuleKey, string> = {
   email: "HAMSA_COST_EMAIL",
   username: "HAMSA_COST_USERNAME",
   telegram: "HAMSA_COST_TELEGRAM",
+  hlr: "HAMSA_COST_HLR",
+  whatsapp: "HAMSA_COST_WHATSAPP",
+  getcontact: "HAMSA_COST_GETCONTACT",
+  ewallet: "HAMSA_COST_EWALLET",
+  breach: "HAMSA_COST_BREACH",
+  humint: "HAMSA_COST_HUMINT",
+  "public-evidence": "HAMSA_COST_PUBLIC_EVIDENCE",
+  name: "HAMSA_COST_NAME",
+  domain: "HAMSA_COST_DOMAIN",
+  "telegram-analytics": "HAMSA_COST_TELEGRAM_ANALYTICS",
 };
 
 const DEFAULT_COST: Record<ModuleKey, number> = {
@@ -27,6 +38,16 @@ const DEFAULT_COST: Record<ModuleKey, number> = {
   email: 3,
   username: 3,
   telegram: 4,
+  hlr: 4,
+  whatsapp: 4,
+  getcontact: 4,
+  ewallet: 4,
+  breach: 4,
+  humint: 8,
+  "public-evidence": 4,
+  name: 4,
+  domain: 4,
+  "telegram-analytics": 8,
 };
 
 export function costOf(module: ModuleKey): number {

@@ -5,6 +5,7 @@ export type AuditAction =
   | "auth.logout"
   | "auth.login_failed"
   | "auth.password_change"
+  | "auth.password.set"
   | "auth.register"
   | "lookup.run"
   | "lookup.denied"
@@ -36,7 +37,13 @@ export type AuditAction =
   | "camera.disabled"
   | "camera.delete"
   | "telegram.sync"
-  | "export.generate";
+  | "export.generate"
+  | "tool.qr"
+  | "chain.create"
+  | "chain.revoke"
+  | "chain.reports.delete"
+  | "chain.report"
+  | "preview.start";
 
 export interface AuditInput {
   userId?: string | null;

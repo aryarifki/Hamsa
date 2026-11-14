@@ -89,7 +89,7 @@ export async function investigateTelegram(
   if (posts.length === 0) {
     signals.push({ label: "No matching public posts retrieved", level: "low" });
     warnings.push(
-      "Only channels with a public preview are readable. Private channels, groups and bots are out of scope by design.",
+      "Only channels with a public preview are readable. Private channels, groups and bots expose no web preview to read.",
     );
   } else {
     signals.push({ label: `${posts.length} matching public post(s)`, level: "info" });

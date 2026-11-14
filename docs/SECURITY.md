@@ -16,13 +16,25 @@ Hamsa stores investigation records, provider credentials, consent references, ca
 | API keys | Credential stuffing, leak | 32-byte random tokens, only a SHA-256 digest at rest, display prefix only, revocable |
 | Abuse of the lookup engine | A compromised account burning credits or targeting a third party | Per-user rate limits, credit balance guard, mandatory authorization reference on cases |
 
-### Explicitly out of scope
+### Trust boundaries
 
-- A malicious server administrator. Someone with root can read the PostgreSQL data directory, the environment, process memory and the snapshot volume.
-- Physical access to the host.
-- Compromise of an upstream provider (ipinfo, HIBP, Numverify). Hamsa records which provider answered and when.
-- A compromised camera or ONVIF device on the network; Hamsa consumes what the device sends.
-- Denial of service beyond the in-process limiter and the bounded cron batch.
+Hamsa secures the application layer. The deployment provides the rest, and the split is
+worth knowing before an incident:
+
+- **Host and database.** Whoever holds root on the box can read the PostgreSQL data
+  directory, the process environment and the snapshot volume. Run Hamsa on a host you
+  control, with disk encryption and a database role that cannot reach anything else.
+- **Network.** Put a TLS terminator in front (the app binds `127.0.0.1` in Compose) and
+  restrict PostgreSQL to the app host. `HAMSA_TRUSTED_PROXY` must only list proxies that
+  actually overwrite `X-Forwarded-For`.
+- **Upstream feeds.** Provider answers are recorded with the provider name and timestamp so
+  a bad upstream response is attributable. `ffmpeg` and any provider client run with the
+  app's privileges.
+- **Cameras and ONVIF devices.** Hamsa consumes what the device sends; the device's own
+  firmware, credentials and network segment are the operator's responsibility.
+- **Availability.** The in-process limiter and the bounded scheduler batch protect against
+  accidental load. Deliberate flooding is absorbed in front of the app (reverse proxy,
+  CDN, or Cloudflare Turnstile via `HAMSA_TURNSTILE_SECRET` for the OTP endpoints).
 
 ## Controls in detail
 

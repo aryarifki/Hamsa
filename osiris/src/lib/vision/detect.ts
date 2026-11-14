@@ -17,7 +17,7 @@ import type { Colour } from './colour';
 /** Where the model is served from, and the size it reads. */
 export const MODEL = {
   name: 'YOLOX-nano',
-  url: '/vendor/yolox/0.1.1rc0/yolox_nano.onnx',
+  url: '/osiris/vendor/yolox/0.1.1rc0/yolox_nano.onnx',
   /** The same file on disk, relative to the app's working directory. */
   path: 'public/vendor/yolox/0.1.1rc0/yolox_nano.onnx',
   input: 416,

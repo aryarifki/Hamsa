@@ -133,7 +133,7 @@ let loading: Promise<PlaceIndex> | null = null;
 
 /** The list in the browser: fetched once, on first use. A failed fetch is tried again next time. */
 export function loadPlaces(): Promise<PlaceIndex> {
-  loading ??= fetch('/places.json')
+    loading ??= fetch('/osiris/places.json')
     .then((res) => {
       if (!res.ok) throw new Error(`places.json HTTP ${res.status}`);
       return res.json() as Promise<PlaceList>;

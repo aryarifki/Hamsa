@@ -4,6 +4,12 @@ const config: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
+  async rewrites() {
+    return [
+      { source: "/osiris", destination: "http://127.0.0.1:3102" },
+      { source: "/osiris/:path*", destination: "http://127.0.0.1:3102/:path*" },
+    ];
+  },
   experimental: {
     serverActions: { bodySizeLimit: "4mb" },
   },
@@ -14,13 +20,13 @@ const config: NextConfig = {
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data: https:",
       "style-src 'self' 'unsafe-inline'",
       // Next injects inline bootstrap scripts; 'unsafe-inline' is required
       // unless a nonce pipeline is added.
       "script-src 'self' 'unsafe-inline'",
-      "connect-src 'self'",
+      "connect-src 'self' https: wss:",
     ].join("; ");
 
     return [

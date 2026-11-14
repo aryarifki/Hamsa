@@ -1,5 +1,6 @@
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -27,9 +28,22 @@ export type RegionCameras = Record<string, Camera[]>;
 const SNAPSHOT_VERSION = 2;
 const INVALIDATED_LEGACY_REGIONS = new Set(['texas', 'florida', 'georgia', 'northcarolina', 'canada']);
 
+const POSSIBLE_SNAPSHOT_FILES = [
+  join(process.cwd(), '.cache', 'cctv-catalog.json'),
+  join(process.cwd(), 'osiris', '.cache', 'cctv-catalog.json'),
+  join(process.cwd(), 'osiris', '.next', 'standalone', '.cache', 'cctv-catalog.json'),
+  '/root/Hamsa/osiris/.next/standalone/.cache/cctv-catalog.json',
+  '/root/Hamsa/.cache/cctv-catalog.json',
+];
+
 /** Overridable so a test never writes into the real cache directory. */
-export const snapshotPath = () =>
-  process.env.OSIRIS_CCTV_SNAPSHOT || join(process.cwd(), '.cache', 'cctv-catalog.json');
+export const snapshotPath = () => {
+  if (process.env.OSIRIS_CCTV_SNAPSHOT) return process.env.OSIRIS_CCTV_SNAPSHOT;
+  for (const f of POSSIBLE_SNAPSHOT_FILES) {
+    if (existsSync(f)) return f;
+  }
+  return join(process.cwd(), '.cache', 'cctv-catalog.json');
+};
 
 interface SnapshotFile {
   version: number;

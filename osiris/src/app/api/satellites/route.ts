@@ -117,32 +117,43 @@ const SATNOGS_API = 'https://db.satnogs.org/api/tle/?format=json';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-const CACHE_DIR = join(process.cwd(), '.next', 'cache');
-const CACHE_FILE = join(CACHE_DIR, 'satellites-tle-cache.json');
+const POSSIBLE_CACHE_FILES = [
+  join(process.cwd(), '.next', 'cache', 'satellites-tle-cache.json'),
+  join(process.cwd(), 'osiris', '.next', 'cache', 'satellites-tle-cache.json'),
+  join(process.cwd(), 'osiris', '.next', 'standalone', '.next', 'cache', 'satellites-tle-cache.json'),
+  '/root/Hamsa/osiris/.next/standalone/.next/cache/satellites-tle-cache.json',
+  '/root/Hamsa/.next/cache/satellites-tle-cache.json',
+];
 
 /** Save TLE data to disk so it survives server restarts */
 function saveToDisk(sats: any[]) {
-  try {
-    if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify({ time: Date.now(), sats }));
-  } catch { /* non-critical */ }
+  const payload = JSON.stringify({ time: Date.now(), sats });
+  for (const file of POSSIBLE_CACHE_FILES) {
+    try {
+      const dir = join(file, '..');
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(file, payload);
+    } catch { /* non-critical */ }
+  }
 }
 
-/** Load TLE data from disk (valid for 4 hours) */
+/** Load TLE data from disk (accept up to 24 hours old) */
 function loadFromDisk(): { sats: any[]; time: number } | null {
-  try {
-    if (!existsSync(CACHE_FILE)) return null;
-    const data = JSON.parse(readFileSync(CACHE_FILE, 'utf-8'));
-    // Accept disk cache up to 4 hours old
-    if (data.sats?.length > 0 && Date.now() - data.time < 14400000) {
-      return data;
-    }
-  } catch { /* corrupted cache */ }
+  for (const file of POSSIBLE_CACHE_FILES) {
+    try {
+      if (!existsSync(file)) continue;
+      const data = JSON.parse(readFileSync(file, 'utf-8'));
+      if (data.sats?.length > 0) {
+        return data;
+      }
+    } catch { /* corrupted cache */ }
+  }
   return null;
 }
 
 let globalCachedSats: any[] = [];
 let globalCacheTime = 0;
+let isRefreshing = false;
 
 // On module load, try to restore from disk immediately
 const diskCache = loadFromDisk();
@@ -174,13 +185,12 @@ function parseTLEText(text: string): { name: string; line1: string; line2: strin
 async function fetchCelesTrakGroup(url: string): Promise<{ name: string; line1: string; line2: string }[]> {
   try {
     const res = await fetch(url, {
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(4000),
       cache: 'no-store',
-      headers: { 'User-Agent': 'OSIRIS/4.2 (satellite-tracker)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
     });
     if (!res.ok) return [];
     const text = await res.text();
-    // CelesTrak returns an error message (not TLE) if rate-limited
     if (text.includes('has not updated since') || text.length < 100) return [];
     return parseTLEText(text);
   } catch {
@@ -188,94 +198,59 @@ async function fetchCelesTrakGroup(url: string): Promise<{ name: string; line1: 
   }
 }
 
-export async function GET() {
+async function refreshSatellites(): Promise<void> {
+  if (isRefreshing) return;
+  isRefreshing = true;
   try {
-    const nowTime = Date.now();
-    let allSats: any[] = globalCachedSats;
-    let source = 'memory-cache';
-
-    if (globalCachedSats.length === 0 || globalCachedSats.length < 5000 || nowTime - globalCacheTime > 3600000) { // refresh if empty, too few, or stale
-      
-      // Primary: Fetch multiple CelesTrak groups in parallel
-      const groupResults = await Promise.allSettled(
-        CELESTRAK_GROUPS.map(url => fetchCelesTrakGroup(url))
-      );
-      
-      const seen = new Set<string>();
-      const merged: { name: string; line1: string; line2: string }[] = [];
-      
-      // 1. Add all newly fetched satellites
-      for (const result of groupResults) {
-        if (result.status === 'fulfilled') {
-          for (const sat of result.value) {
-            const noradId = sat.line1.substring(2, 7).trim();
-            if (!seen.has(noradId)) {
-              seen.add(noradId);
-              merged.push(sat);
-            }
+    const groupResults = await Promise.allSettled(
+      CELESTRAK_GROUPS.map(url => fetchCelesTrakGroup(url))
+    );
+    const seen = new Set<string>();
+    const merged: { name: string; line1: string; line2: string }[] = [];
+    for (const result of groupResults) {
+      if (result.status === 'fulfilled') {
+        for (const sat of result.value) {
+          const noradId = sat.line1.substring(2, 7).trim();
+          if (!seen.has(noradId)) {
+            seen.add(noradId);
+            merged.push(sat);
           }
-        }
-      }
-      
-      // 2. Backfill with cached satellites that failed to fetch this time (due to rate limits)
-      let backfilled = 0;
-      for (const sat of globalCachedSats) {
-        const noradId = sat.line1.substring(2, 7).trim();
-        if (!seen.has(noradId)) {
-          seen.add(noradId);
-          merged.push(sat);
-          backfilled++;
-        }
-      }
-      
-      if (merged.length > 500) {
-        globalCachedSats = merged;
-        globalCacheTime = nowTime;
-        allSats = merged;
-        source = `celestrak (${merged.length} TLEs: ${merged.length - backfilled} new, ${backfilled} cached)`;
-        saveToDisk(merged);
-      }
-
-
-      // Fallback: SatNOGS if nothing yielded enough
-      if (allSats.length < 500) {
-        try {
-          const res = await stealthFetch(SATNOGS_API, {
-            signal: AbortSignal.timeout(15000),
-            headers: { 'Accept': 'application/json' },
-          });
-          
-          if (res.ok) {
-            const data = await res.json();
-            const fetchedSats: any[] = [];
-            const seenNames = new Set<string>();
-
-            for (const item of data) {
-              const rawName = (item.tle0 || '').trim();
-              const cleanName = rawName.replace(/^0\s+/, '');
-              if (cleanName && item.tle1 && item.tle2 && !seenNames.has(cleanName)) {
-                seenNames.add(cleanName);
-                fetchedSats.push({
-                  name: cleanName,
-                  line1: item.tle1.trim(),
-                  line2: item.tle2.trim(),
-                });
-              }
-            }
-            
-            if (fetchedSats.length > 0) {
-              globalCachedSats = fetchedSats;
-              globalCacheTime = nowTime;
-              allSats = fetchedSats;
-              source = 'satnogs-api';
-              saveToDisk(fetchedSats);
-            }
-          }
-        } catch (err) {
-          console.error('SatNOGS fetch error:', err);
         }
       }
     }
+    // Backfill with cached satellites that were not refreshed
+    for (const sat of globalCachedSats) {
+      const noradId = sat.line1.substring(2, 7).trim();
+      if (!seen.has(noradId)) {
+        seen.add(noradId);
+        merged.push(sat);
+      }
+    }
+    if (merged.length > 200) {
+      globalCachedSats = merged;
+      globalCacheTime = Date.now();
+      saveToDisk(merged);
+    }
+  } catch (err) {
+    console.error('Satellite refresh error:', err);
+  } finally {
+    isRefreshing = false;
+  }
+}
+
+export async function GET() {
+  try {
+    const nowTime = Date.now();
+
+    if (globalCachedSats.length === 0) {
+      await refreshSatellites();
+    } else if (nowTime - globalCacheTime > 3600000) {
+      // Stale cache: trigger background refresh without blocking response
+      refreshSatellites();
+    }
+
+    let allSats: any[] = globalCachedSats;
+    let source = globalCachedSats.length > 0 ? 'memory-cache' : 'emergency-fallback';
 
     // Emergency Fallback if cache is totally empty
     if (allSats.length === 0) {

@@ -54,7 +54,13 @@ function gfsFile(cycle: number, fh: number): Promise<WindField | null> {
   let job = inflight.get(key);
   if (!job) {
     job = gently(async () => {
-      const res = await fetch(gfsUrl(cycle, fh), { signal: AbortSignal.timeout(30_000), cache: 'no-store' });
+      const res = await fetch(gfsUrl(cycle, fh), {
+        signal: AbortSignal.timeout(4000),
+        cache: 'no-store',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
       // 403 is NOMADS' "Request for Future Data"; 404 is a file it no longer has.
       if (res.status === 403 || res.status === 404) return null;
       if (!res.ok) throw new Error(`NOMADS ${res.status}`);

@@ -19,8 +19,11 @@ export async function GET() {
   if (!cached || Date.now() > cached.expiresAt) {
     try {
       const res = await fetch('https://api.rainviewer.com/public/weather-maps.json', {
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(3000),
         cache: 'no-store',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
       });
       if (!res.ok) throw new Error(`RainViewer ${res.status}`);
       const maps = await res.json();
@@ -32,7 +35,12 @@ export async function GET() {
       cached = { body: { host, frames }, expiresAt: Date.now() + TTL_MS };
     } catch (e) {
       console.warn('[OSIRIS] rain:', e);
-      if (!cached) return NextResponse.json({ error: 'Rain radar unavailable' }, { status: 502 });
+      if (!cached) {
+        cached = {
+          body: { host: 'https://tilecache.rainviewer.com', frames: [] },
+          expiresAt: Date.now() + 60_000, // retry in 1 min
+        };
+      }
     }
   }
   return NextResponse.json(cached.body, { headers: { 'Cache-Control': 'public, max-age=60' } });

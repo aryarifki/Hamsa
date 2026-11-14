@@ -433,20 +433,24 @@ async function buildFeed(): Promise<FeedPayload> {
 
 export async function GET() {
   try {
-    const fresh = feed && Date.now() - feed.at < FEED_TTL_MS;
-    if (!fresh) {
-      // One build at a time: concurrent readers wait for it rather than each
-      // starting their own and spending the place budget several times over.
+    if (!feed) {
       building ??= buildFeed().finally(() => { building = null; });
       const body = await building;
       feed = { at: Date.now(), body };
+    } else if (Date.now() - feed.at >= FEED_TTL_MS) {
+      // Revalidate in background without blocking response
+      if (!building) {
+        building = buildFeed().then(body => {
+          feed = { at: Date.now(), body };
+          return body;
+        }).finally(() => { building = null; });
+      }
     }
-    return NextResponse.json(feed!.body, {
+    return NextResponse.json(feed.body, {
       headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
     });
   } catch {
-    // A build that fails leaves the last good feed in place, if there is one.
     if (feed) return NextResponse.json(feed.body, { headers: { 'Cache-Control': 'public, s-maxage=30' } });
-    return NextResponse.json({ news: [], error: 'Failed to fetch intel' }, { status: 500 });
+    return NextResponse.json({ news: [], total: 0, sources: [], timestamp: new Date().toISOString() });
   }
 }

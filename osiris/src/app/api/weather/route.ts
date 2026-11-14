@@ -176,17 +176,17 @@ async function collectEvents(): Promise<WeatherEvent[]> {
   {
     const [eonetRes, nwsRes, gdacsRes] = await Promise.allSettled([
       stealthFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=100', {
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(4000),
       }),
       fetch('https://api.weather.gov/alerts/active?status=actual&message_type=alert', {
         headers: {
           Accept: 'application/geo+json',
-          'User-Agent': 'OSIRIS Severe Weather Layer',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(4000),
       }),
       stealthFetch('https://www.gdacs.org/xml/rss.xml', {
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(4000),
       }),
     ]);
 

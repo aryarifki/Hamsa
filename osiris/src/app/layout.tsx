@@ -205,13 +205,18 @@ export default function RootLayout({
               window.fetch = (input, init) => {
                 let url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
                 const origin = window.location.origin;
-                if (url.startsWith('/api/')) {
+                if (url.startsWith('/api/') || url.startsWith('/data/')) {
                   const mapped = '/osiris' + url;
                   if (typeof input === 'string') return originalFetch(mapped, init);
                   return originalFetch(new Request(mapped, input), init);
                 }
                 if (url.startsWith(origin + '/api/')) {
                   const mapped = url.replace(origin + '/api/', origin + '/osiris/api/');
+                  if (typeof input === 'string') return originalFetch(mapped, init);
+                  return originalFetch(new Request(mapped, input), init);
+                }
+                if (url.startsWith(origin + '/data/')) {
+                  const mapped = url.replace(origin + '/data/', origin + '/osiris/data/');
                   if (typeof input === 'string') return originalFetch(mapped, init);
                   return originalFetch(new Request(mapped, input), init);
                 }

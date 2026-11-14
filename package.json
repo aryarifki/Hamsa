@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build && node scripts/copy-standalone-assets.mjs && npm run build:osiris",
     "start": "node scripts/start-production.mjs",
-    "build:osiris": "npm install --prefix osiris --ignore-scripts && npm run build --prefix osiris && node scripts/copy-standalone-assets.mjs osiris",
+    "build:osiris": "npm run build --prefix osiris && node scripts/copy-standalone-assets.mjs osiris",
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs --test --test-concurrency=1 tests/*.test.mjs",
     "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-ts.mjs scripts/seed.mjs",

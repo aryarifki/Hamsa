@@ -10,8 +10,8 @@ const config: NextConfig = {
   async rewrites() {
     return [
       { source: "/hamsa-assets/_next/:path*", destination: "/_next/:path*" },
-      { source: "/osiris", destination: "http://127.0.0.1:3102" },
-      { source: "/osiris/:path*", destination: "http://127.0.0.1:3102/:path*" },
+      { source: "/osiris", destination: "http://127.0.0.1:3102/osiris" },
+      { source: "/osiris/:path*", destination: "http://127.0.0.1:3102/osiris/:path*" },
     ];
   },
   experimental: {

@@ -391,7 +391,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         // Route all CARTO CDN requests through the internal Next.js proxy API
         if (url.includes('cartocdn.com')) {
           const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-          return { url: `${baseUrl}/api/proxy-tiles?url=${encodeURIComponent(url)}` };
+          return { url: `${baseUrl}/osiris/api/proxy-tiles?url=${encodeURIComponent(url)}` };
         }
         return { url };
       },

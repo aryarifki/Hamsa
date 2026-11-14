@@ -203,9 +203,15 @@ export default function RootLayout({
             __html: `(() => {
               const originalFetch = window.fetch.bind(window);
               window.fetch = (input, init) => {
-                const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+                let url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+                const origin = window.location.origin;
                 if (url.startsWith('/api/')) {
                   const mapped = '/osiris' + url;
+                  if (typeof input === 'string') return originalFetch(mapped, init);
+                  return originalFetch(new Request(mapped, input), init);
+                }
+                if (url.startsWith(origin + '/api/')) {
+                  const mapped = url.replace(origin + '/api/', origin + '/osiris/api/');
                   if (typeof input === 'string') return originalFetch(mapped, init);
                   return originalFetch(new Request(mapped, input), init);
                 }

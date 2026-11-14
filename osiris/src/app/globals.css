@@ -1,6 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/* Hamsa integration build marker: keep the embedded OSIRIS stylesheet fresh. */
+:root { --hamsa-osiris-integration: 1; }
+
 /* ═══════════════════════════════════════════════════════════════
    OSIRIS — Global Intelligence Platform Design System
    Egyptian Mythology × Dark Ops × Glassmorphism

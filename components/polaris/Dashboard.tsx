@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
-import { type Map as MaplibreMap, type StyleSpecification } from "maplibre-gl";
+import { type Map as MaplibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   DEFAULT_UI,
@@ -41,19 +41,10 @@ import { CctvMapLayer } from "./cctv-layer";
  * comes from Hamsa's own endpoints.
  */
 
-const DARK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    carto: {
-      type: "raster",
-      tiles: ["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors © CARTO",
-    },
-  },
-  layers: [{ id: "carto-dark", type: "raster", source: "carto" }],
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-};
+// ponytail: Phone-X parity — dark-matter vector style loaded by URL exactly like
+// the Phone-X bundle (`s4.dark`). Tiles/glyphs/sprite are public, no apikey needed.
+const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const CARTO_GLYPHS = "https://tiles.basemaps.cartocdn.com/v/20261026-01/fonts/{fontstack}/{range}.pbf";
 
 const SAT_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const SAT_ATTR = "Tiles © Esri, Maxar, Earthstar Geographics, and the GIS User Community";
@@ -214,7 +205,7 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
           version: 8,
           sources: { esri: { type: "raster", tiles: [SAT_TILES], tileSize: 256, attribution: SAT_ATTR, maxzoom: 18 } },
           layers: [{ id: "esri-sat", type: "raster", source: "esri" }],
-          glyphs: DARK_STYLE.glyphs,
+          glyphs: CARTO_GLYPHS,
         });
       } else {
         instance.setStyle(DARK_STYLE);

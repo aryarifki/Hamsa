@@ -131,3 +131,98 @@ Hamsa (setelah implementasi paritas):
 - Modul provider-gated (HLR, GetContact, e-wallet, breach, FIRMS) mengembalikan hasil offline/parsial + `warnings` bila key tidak diset — bukan kegagalan senyap.
 - Katalog CCTV berisi tautan portal; stream hanya diputar bila operator mengisi `HAMSA_PUBLIC_CCTV_<SLUG>`. Tidak ada scraping portal pihak ketiga.
 - Feed AIS dan energy (generator/BBM/transmisi) yang ada di Polaris-X belum punya sumber publik gratis yang setara; endpoint-nya belum dibuat.
+
+## 6. Polaris dashboard parity (update 15 November 2026)
+
+Reverse engineering chunk Polaris-X (`osiris-polaris-bts-retention-r3-20261113.js`, 8.7 MB) →
+14 modul split parse-OK, REA `ev_a147120eb04e36b7bab3bbdd1f4ad0ad010d06e1990d16d276feba485e29700b`
+(301k AST nodes, 161 findings). Referensi UI lengkap:
+`/root/.local/share/phonex-re/POLARIS_UI_REFERENCE.md`.
+
+### 6.1 Yang direplikasi (first-party, tanpa proxying ke Phone-X)
+
+| Elemen | Polaris-X | Hamsa | Status |
+|---|---|---|---|
+| Shell | `<main class="osiris">` full-viewport, peta MapLibre full-bleed | `components/polaris/Dashboard.tsx` overlay fixed z-60 di atas console + tombol EXIT (deviasi minimal: Hamsa punya sidebar) | **setara** |
+| CSS | 13 blok stylesheet embedded (126 KB, 617 rule `.osiris`, font "Polaris Oxanium" 800) | diekstrak utuh → `app/(console)/polaris/polaris.css`; font Oxanium ExtraBold (OFL) self-host di `public/fonts/Oxanium-ExtraBold.ttf`; interpolasi JS `${Sa}`→`#67d9bb`, `${jt}`→path mask; + blok CSS first-party untuk shell/EXIT/presence/gate/popups | **setara** |
+| Left tools (11) | home, self-track, hazards, flights, cctv, bts, maritime, energy, datacenter, satellite, maintenance | semua 11 tool dirender, urutan & label sama | **setara** |
+| Modes | 3D/2D (projection globe/mercator, globe hanya zoom<12) + MAP/SAT (SAT = ArcGIS World_Imagery `server.arcgisonline.com`) | sama; persist di localStorage | **setara** |
+| Hazards | 4 toggle (EARTHQUAKES BMKG+USGS / ACTIVE FIRES FIRMS / SEVERE WEATHER EONET,NOAA,NWS,GDACS / VOLCANOES MAGMA-PVMBG) + count badge | sama; data dari `/api/v1/osiris/bmkg` (quakes/disasters/fires); volcanoes count 0 (tidak ada feed) | **setara** |
+| Flights | panel + switch layer, kategori airborne/ground (#24d9ef/#9aafc0), bar proporsi, scope dropdown (indonesia/sea/asia/europe/middle-east/us/current/global), CALLSIGN search | sama (OpenSky via Hamsa); center/zoom per scope dari bundle (sea [108,7] z3.35, asia [86,31] z2.45, europe [12,52] z3.05, me [46,27] z3.45, us [-98,39] z2.65) | **setara** |
+| Space | "SPACE TRACKING", kategori i5 (ALL/STARLINK/MILITARY/GPS/EARTH OBS/STATIONS), CelesTrak | panel + list stations CelesTrak saja; kategori lain **tidak difabrikasi** (tanpa data lokal) | **parsial (jujur)** |
+| CCTV | kategori kota + FAVORIT, grid, pagination, favorites localStorage, player HLS/mp4/flv/jsmpeg/youtube | parity penuh — lihat §7: 9 kategori keyword-based, 5818 kamera (bundle 2841 + runtime 2977), HLS player ke relay/direct first-party, preview popup + monitor 1×1/2×2 di atas peta | **setara (§7)** |
+| Presence | `POST /api/polaris/presence/heartbeat` `{visitorId}` 25s saat tab visible, window 90s, `{activeVisitors}` | `POST /api/v1/polaris/presence/heartbeat` — wire-shape sama, in-memory Map TTL 90s, rate limit 40/min/IP, UUID v4 divalidasi | **setara** |
+| Owner media | `POST /api/osiris/owner-media-session` → `{expiresAt}` (proof, poll 60s) | dihapus (model §7: player HLS Phone-X tidak gating owner media) | **n/a** |
+| Ticker | atas: news ● LIVE (hover-pause, click detail); bawah: cluster quake berwarna per magnitudo + separator `\|` | sama; data RSS Hamsa + BMKG; warna quake M≥6 #ff5353 / M≥5 #ff9a3d / M≥4 #ffd51c / else #44ef99 | **setara** |
+| Readout | ZULU clock / STATUS: LIVE / SOURCE STANDBY + cursor readout koordinat | ZULU / STATUS LIVE-STANDBY / PREVIEW countdown + cursor readout | **setara** |
+| Preview gate | anonim 5 menit → cooldown 35 menit (`POLARIS_PREVIEW_EXPIRED`) | overlay Polaris-style saat preview closed; feed hanya ditarik saat preview aktif (guardrail biaya tetap) | **setara** |
+
+### 6.2 SOURCE UNAVAILABLE (keputusan desain)
+
+Feed Polaris-X yang Hamsa belum jalankan (AIS kapal, pelabuhan PIPP, rute pelayaran, energy
+generator/transmisi/BBM, datacenter, BTS OpenCelliD) dirender panel dengan struktur identik
+tapi state **SOURCE UNAVAILABLE** — bukan data karangan. Panel memakai kelas CSS Polaris-X
+asli (`osiris-maritime-panel`, `osiris-energy-panel`, `polaris-dc-panel`, `osiris-bts-panel`).
+
+### 6.3 Pengaturan & persistensi (Hamsa keys, bukan `phonex:*`)
+
+| Key | Isi |
+|---|---|
+| `hamsa:polaris:ui:v1` | mode (3d/2d), basemap (map/sat), layers, hazards |
+| `hamsa:polaris:cctv-favorites:v1` | array `<camera-id>` (Phone-X parity — key murni id kamera, tanpa prefix slug) |
+| `hamsa:polaris:visitor:v1` | UUID v4 presence |
+
+### 6.4 Endpoint baru
+
+- `POST /api/v1/polaris/presence/heartbeat` — presence 90s window (tanpa auth, rate-limited, UUID validated).
+
+Endpoint Hamsa yang dikonsumsi dashboard: `/api/v1/osiris/{preview/status,bmkg,aviation/opensky,
+aviation/satellites,news,polaris/cctv/catalogs}` + relay `/api/v1/osiris/cctv/<slug>/<id>/{index.m3u8,segment}`.
+
+### 6.5 Verifikasi (15 November 2026)
+
+- `npm run typecheck` → exit 0.
+- `npm test` → **58/58 pass** (setelah perbaikan env DB lokal: role `hamsa`+grant `hamsa_test`, ownership tabel `hamsa_test` dialihkan ke `hamsa`; kegagalan 50-test sebelumnya murni env, bukan kode).
+- `npm run build` → exit 0; route `/polaris` terdaftar. Catatan build: interpolasi `${...}` pada CSS ekstrak memicu `CssSyntaxError` Turbopack — diselesaikan dengan substitusi literal.
+- Login Phone-X tidak pernah dipakai; seluruh temuan dari static bundle (`likely` untuk sisi server Phone-X, `confirmed` untuk UI/bundle).
+
+## 7. CCTV Polaris-X parity penuh (update 16 November 2026)
+
+Replikasi penuh model CCTV Phone-X menggantikan model 31-kota env-based.
+
+- **Data**: static bundle `data/polaris-cctv-cameras.json` (2841 kamera) + 7 runtime katalog
+  (`data/polaris-cctv-catalogs/{bandung,banyuwangi,bojonegoro,depok,gresik,malangkota,semarang}.json`,
+  2977 kamera, zero overlap id) → **5818 kamera**. Bundle di-load client sebagai dynamic import chunk
+  terpisah (~2 MB, hanya saat tool CCTV aktif); runtime katalog dari endpoint first-party
+  `GET /api/v1/osiris/polaris/cctv/catalogs`. Salatiga persisten 502 → `unavailable`.
+- **Kategori**: 9 kategori keyword-based (`R7` port exact ke `lib/polaris/cctv.ts`: SEMUA/FAVORIT/
+  JALAN TOL/KOTA/GUNUNG/BENDUNGAN/TERMINAL/PELABUHAN/LAINNYA) — classifier `Gn` + `wr` word-match,
+  bukan model per-kota lama.
+- **Upstream registry** (diverifikasi dari server): **server relay** bandung
+  (pelindung.bandung.go.id:3443, no CORS) + depok (dishub.depok.go.id, CORS dsw.depok.go.id only);
+  **client direct** semarang (livepantau, CORS *) + seluruh bundle direct-hls (balitower dll);
+  **hidden → failure state asli Phone-X**: molecool, tangerang (Filament+Livewire butuh login),
+  banyuwangi (`wt` base 404), malangkota, gresik (unavailable), salatiga (502), ponorogo (endpoint
+  stream butuh Bearer token Phone-X).
+- **Relay server-side** (`lib/polaris/cctv-relay.ts`): playlist di-fetch server, segment URL
+  di-rewrite ke `/segment?t=<hmac>&s=<relpath>` — upstream URL tidak pernah sampai client; token
+  TTL 10 menit, HMAC-SHA256, in-memory map, timing-safe compare. Rate limit 120 relay + 600
+  segment/menit/user. Master playlist variant di-rewrite rekursif.
+- **Player** (`components/polaris/cctv-players.tsx`): `Nr` port (hls.js dengan watchdog frame
+  20 detik, source fallback direct→relay, retry 60 detik), `Qs` port router (youtube → iframe,
+  ponorogo-mse → failure state, lainnya HLS), `ia` port detail. Relay path Phone-X
+  `/api/osiris/cctv/` di-rewrite ke `/api/v1/osiris/cctv/` client-side.
+- **UI** (`components/polaris/cctv-panel.tsx`, `cctv-layer.tsx`): `Kv` kategori panel, `fv` preview
+  popup (MapLibre Popup + sort live-first + navigasi multi-kamera per titik), `wv` viewer monitor
+  1×1/2×2 dengan fullscreen CSS-fallback + pagination, `Pv` tile, `C5` map layer (icon CCTV SDF
+  putih + `icon-color:#ffd51c` kuning, halo #02050a, cluster maxZoom 10 radius 48, label 2-baris)
+  + selection pulse `Fa`. Marker kuning, bukan biru.
+- **Integrasi**: hapus model lama (route `osiris/cctv/[city]/*`, `lib/cctv/public-feeds.ts`
+  unused, halaman console `/osiris-cctv`, owner-media gating — Phone-X HLS player tidak gating).
+  Favorites key = `camera.id` murni (Phone-X parity). Status dari player meng-override via
+  `statusOverrides`.
+- **Verifikasi 16 November 2026**: typecheck exit 0; `npm test` **67/67 pass** (9 baru: classifier
+  word-match, kategori, relay token sign/tamper/expiry, playlist rewrite tags); `npm run build`
+  exit 0; relay bandung+depok 200 (segment rewritten, `video/MP2T` 192 KB OK, tamper 403);
+  hidden slug → 502 `upstream_unavailable` (Cloudflare menggantikan body JSON 502 dengan error
+  page sendiri — player tetap lihat non-200 → failure state, perilaku fungsional sama).

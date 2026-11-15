@@ -60,7 +60,6 @@ const GROUPS: Array<{
     items: [
       { href: "/osiris", label: "OSIRIS Global", icon: "globe" },
       { href: "/polaris", label: "Polaris-X", icon: "globe" },
-      { href: "/osiris-cctv", label: "Public CCTV", icon: "camera" },
       { href: "/geofence-chain", label: "Tango chains", icon: "pin" },
     ],
   },

@@ -15,7 +15,6 @@ import {
   type Basemap,
   type HazardState,
   type LayerState,
-  type PreviewState,
   type SituationItem,
   type UiSettings,
   type ViewMode,
@@ -109,8 +108,6 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
 
   const [ui, setUi] = useState<UiSettings>(DEFAULT_UI);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState<PreviewState | null>(null);
-  const [statusError, setStatusError] = useState<string | null>(null);
   const [tool, setTool] = useState<ToolKey | null>(null);
   const [flightTab, setFlightTab] = useState<"layers" | "overview">("layers");
   const [scope, setScope] = useState<FlightScope>("indonesia");
@@ -126,10 +123,9 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [view, setView] = useState({ zoom: ID_VIEW.zoom, center: ID_VIEW.center });
 
-  const active = Boolean(status?.active);
-  const feeds = useFeeds(active);
+  const feeds = useFeeds(true);
   const presence = usePresence(true);
-  const cctvActive = tool === "cctv" && active;
+  const cctvActive = tool === "cctv";
   const { cameras: cctvCameras, loading: cctvLoading } = useCctvCameras(cctvActive);
 
   const cctvCamerasLive = useMemo(
@@ -172,34 +168,6 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
     },
     [],
   );
-
-  /* preview status (Hamsa cost guardrail) */
-  const refreshStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/v1/osiris/preview/status", { cache: "no-store" });
-      if (res.ok) setStatus((await res.json()) as PreviewState);
-    } catch {
-      setStatusError("Status preview tidak terbaca.");
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshStatus();
-    const timer = window.setInterval(() => void refreshStatus(), 15_000);
-    return () => window.clearInterval(timer);
-  }, [refreshStatus]);
-
-  async function startPreview() {
-    setStatusError(null);
-    const res = await fetch("/api/v1/osiris/preview/status", { method: "POST" });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setStatusError((body as { error?: string }).error ?? "Preview tidak bisa dimulai");
-      await refreshStatus();
-      return;
-    }
-    setStatus(body as PreviewState);
-  }
 
   /* ZULU clock */
   useEffect(() => {
@@ -412,9 +380,8 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
             <strong>ZULU</strong> {zulu}Z
           </span>
           <span>
-            STATUS: <strong>{active ? "LIVE" : "STANDBY"}</strong>
+            STATUS: <strong>LIVE</strong>
           </span>
-          <span>PREVIEW {active ? `${status?.secondsRemaining ?? 0}s` : "CLOSED"}</span>
         </div>
 
         {cursor && (
@@ -518,7 +485,6 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
               type="button"
               title="Flights: OpenSky live"
               aria-pressed={tool === "flights"}
-              disabled={!active}
               onClick={() => setTool(tool === "flights" ? null : "flights")}
             >
               ✈
@@ -761,25 +727,6 @@ export default function PolarisDashboard({ onClose }: { onClose: () => void }) {
         </div>
 
         <TickerDetail detail={tickerDetail} onClose={() => setTickerDetail(null)} />
-
-        {!active && (
-          <div className="polaris-gate" role="dialog" aria-label="Preview closed">
-            <div className="polaris-gate__card">
-              <strong>POLARIS PREVIEW CLOSED</strong>
-              <p>
-                Data situasional ditarik hanya selama jendela preview 5 menit. Peta dan layer tetap aktif;
-                feed upstream hanya berjalan saat jendela dibuka.
-              </p>
-              <button type="button" className="polaris-gate__start" onClick={startPreview}>
-                START 5-MINUTE PREVIEW
-              </button>
-              {status && status.secondsUntilNext > 0 && (
-                <span className="polaris-gate__cooldown">cooldown · {status.secondsUntilNext}s</span>
-              )}
-              {statusError && <span className="polaris-gate__error">{statusError}</span>}
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { fail, ok, requireAuth, HttpError } from "@/lib/http";
-import { assertPreview, PreviewError } from "@/lib/intel/preview";
 import { adsbFlights } from "@/lib/intel/situational";
 
 export const runtime = "nodejs";
@@ -9,7 +8,6 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   try {
     const { user } = await requireAuth(req);
-    assertPreview(user.id);
     const lat = Number(req.nextUrl.searchParams.get("lat") ?? -6.2);
     const lon = Number(req.nextUrl.searchParams.get("lon") ?? 106.8);
     const dist = Number(req.nextUrl.searchParams.get("dist") ?? 120);
@@ -20,7 +18,6 @@ export async function GET(req: NextRequest) {
     );
     return ok({ feed, aircraft, count: aircraft.length });
   } catch (err) {
-    if (err instanceof PreviewError) return fail(403, err.message, { code: err.code });
     if (err instanceof HttpError) return fail(err.status, err.message, err.extra);
     console.error("[osiris] adsb failed", err);
     return fail(502, "ADS-B feed unavailable");

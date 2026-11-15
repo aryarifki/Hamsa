@@ -30,6 +30,10 @@ const config: NextConfig = {
       // Next injects inline bootstrap scripts; 'unsafe-inline' is required
       // unless a nonce pipeline is added.
       "script-src 'self' 'unsafe-inline'",
+      // MapLibre GL spawns its vector-tile worker as a blob: worker — without
+      // worker-src blob: the worker is CSP-blocked and vector basemaps render
+      // as a black canvas (raster basemaps are unaffected).
+      "worker-src 'self' blob: data:",
       "connect-src 'self' https: wss:",
     ].join("; ");
 

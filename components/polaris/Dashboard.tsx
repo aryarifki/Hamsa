@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
-import { type Map as MaplibreMap } from "maplibre-gl";
+import { type Map as MaplibreMap, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   DEFAULT_UI,
@@ -40,6 +40,12 @@ import { CctvMapLayer } from "./cctv-layer";
  * ticker, quake bottom ticker, presence counter and cursor readout. All data
  * comes from Hamsa's own endpoints.
  */
+
+// ponytail: Next/turbopack tidak rewrite import.meta.url dalam blob worker maplibre
+// (blob berisi `import <new URL(worker, import.meta.url)>` yang ter-resolve ke URL
+// halaman → text/html → worker mati → basemap vector hitam). Worker di-host sendiri
+// di public/workers dan di-override lewat setWorkerUrl.
+setWorkerUrl("/workers/maplibre-gl-worker.mjs");
 
 // ponytail: Phone-X parity — dark-matter vector style loaded by URL exactly like
 // the Phone-X bundle (`s4.dark`). Tiles/glyphs/sprite are public, no apikey needed.

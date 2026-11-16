@@ -15,7 +15,7 @@ set -e
 # --- Configuration ---
 SERVER="root@100.89.48.10"
 REMOTE_DIR="/root/osiris"
-BRANCH="master"
+BRANCH="main"
 
 # Colors
 RED='\033[0;31m'
@@ -31,11 +31,13 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # --- STEP 1: Git Commit & Push ---
-echo -e "${YELLOW}[1/2] GIT — Staging & Pushing...${NC}"
-git add -A
-
+# osiris/ is a directory of the Hamsa repo on branch `main`, not its own
+# repository — the source is pushed there. Do NOT `git add -A` here: the
+# workspace holds untracked junk (osiris/off, stray intel/ builds) that
+# must never ship.
+echo -e "${YELLOW}[1/2] GIT — Pushing tracked source...${NC}"
 COMMIT_MSG="${1:-deploy: update osiris production $(date '+%Y-%m-%d %H:%M')}"
-git commit -m "$COMMIT_MSG" || echo -e "${YELLOW}  (nothing new to commit)${NC}"
+git commit -m "$COMMIT_MSG" 2>/dev/null || echo -e "${YELLOW}  (nothing new to commit)${NC}"
 
 git push origin "$BRANCH"
 echo -e "${GREEN}  ✓ Pushed to origin/$BRANCH${NC}"

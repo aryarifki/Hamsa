@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, Mountain } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
+import { loadFavoriteCameras, CAMERA_FAVORITES_EVENT } from '@/lib/camera-favorites';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -181,8 +182,19 @@ const HUD_EASE = [0.22, 1, 0.36, 1] as const;
 const hudIn = (delay: number) => ({ duration: 0.7, ease: HUD_EASE, delay });
 
 export default function Dashboard() {
-  const dataRef = useRef<any>({});
+  /* Polaris parity: CCTV favorites live in localStorage and are shared with
+     the map (the FAVORIT tile filters on them) through the data bus. */
+  const [cameraFavorites] = useState<Set<string>>(() => new Set(loadFavoriteCameras()));
+  const dataRef = useRef<any>({ cameraFavorites });
   const [dataVersion, setDataVersion] = useState(0);
+  useEffect(() => {
+    const handler = () => {
+      dataRef.current = { ...dataRef.current, cameraFavorites: new Set(loadFavoriteCameras()) };
+      setDataVersion(value => value + 1);
+    };
+    window.addEventListener(CAMERA_FAVORITES_EVENT, handler);
+    return () => window.removeEventListener(CAMERA_FAVORITES_EVENT, handler);
+  }, []);
   const data = dataRef.current;
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');

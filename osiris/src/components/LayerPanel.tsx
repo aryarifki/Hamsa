@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { CctvCamera } from '@/app/api/cctv/types';
 import {
   Plane, Satellite, Sun, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
@@ -114,6 +115,17 @@ const LAYER_GROUPS: LayerGroupDef[] = [
       { key: 'cctv', label: 'CCTV Cameras', dataKey: 'cameras' },
       { key: 'cctv_previews', label: 'Live Previews', dataKey: '', parent: 'cctv' },
       { key: 'live_news', label: 'Live News Feeds', dataKey: 'live_feeds' },
+      /* Polaris parity — the Indonesian portal categories. Counts read the
+         per-camera `category` the indonesia region sets, not category_counts,
+         because cameras arrive region-by-region rather than in one payload. */
+      { key: 'cctv_id_fav', label: 'Favorit', dataKey: 'cameras', catKey: 'favorite' },
+      { key: 'cctv_id_toll', label: 'Jalan Tol', dataKey: 'cameras', catKey: 'toll' },
+      { key: 'cctv_id_city', label: 'Kota', dataKey: 'cameras', catKey: 'city' },
+      { key: 'cctv_id_mountain', label: 'Gunung', dataKey: 'cameras', catKey: 'mountain' },
+      { key: 'cctv_id_dam', label: 'Bendungan', dataKey: 'cameras', catKey: 'dam' },
+      { key: 'cctv_id_terminal', label: 'Terminal', dataKey: 'cameras', catKey: 'terminal' },
+      { key: 'cctv_id_port', label: 'Pelabuhan', dataKey: 'cameras', catKey: 'port' },
+      { key: 'cctv_id_other', label: 'Lainnya', dataKey: 'cameras', catKey: 'other' },
     ],
   },
   {
@@ -269,6 +281,16 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
 
   const getCount = (dk: string, catKey?: string): number | null => {
     if (!dk) return null;
+    /* Polaris parity: the Indonesian category tiles count per-camera
+       `category` fields, not a server-side category_counts, because cameras
+       arrive region-by-region through the partial catalog. */
+    if (catKey && dk === 'cameras' && Array.isArray(data.cameras)) {
+      if (catKey === 'favorite') {
+        const favs = data.cameraFavorites as Set<string> | undefined;
+        return favs ? data.cameras.filter((c: CctvCamera) => favs.has(String(c.id))).length : 0;
+      }
+      return data.cameras.filter((c: CctvCamera) => c.category === catKey).length;
+    }
     if (catKey && data.category_counts) {
       return data.category_counts[catKey] || 0;
     }

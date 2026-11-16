@@ -12,6 +12,8 @@ export interface CctvCamera {
   /** Live video stream (HLS .m3u8) or embed URL (YouTube/rtsp.me) */
   stream_url?: string;
   stream_type?: CctvStreamType;
+  /** Polaris parity: the 9-category bucket the Indonesian layer filters on. */
+  category?: string;
   external_url?: string;
   source: string;
 }

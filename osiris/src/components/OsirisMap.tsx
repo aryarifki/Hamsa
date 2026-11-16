@@ -3,6 +3,8 @@
 import { buildGeometry, closeRing, drawReducer, initialDrawState, measure, type DrawAction, type DrawMode, type DrawProgress, type DrawResult, type DrawState } from '@/lib/draw';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import * as maplibregl from 'maplibre-gl';
+import type { MapGeoJSONFeature } from 'maplibre-gl';
+import type { CctvCamera } from '@/app/api/cctv/types';
 import { installTerrainTileProtocol } from '@/lib/terrain-tiles';
 import { CLOUDS_ATTRIBUTION, CLOUDS_CREDIT, CLOUDS_LAYER, frameTime } from '@/lib/live-clouds';
 import { createCloudLayer } from '@/lib/live-clouds-layer';
@@ -49,6 +51,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
  * vehicles defer to these, and to nothing else: the basemap, the night shade
  * and other fills are not click targets.
  */
+/* Polaris parity — the nine Indonesian CCTV filter tiles, shared by the
+   geo filter and the layer visibility effect. */
+const CCTV_CATEGORY_LAYERS = ['cctv_id_fav', 'cctv_id_toll', 'cctv_id_city', 'cctv_id_mountain', 'cctv_id_dam', 'cctv_id_terminal', 'cctv_id_port', 'cctv_id_other'] as const;
 const CLICKABLE_LAYERS: ReadonlySet<string> = new Set(['conflict-icons','cctv-dots','eq-circles','fires-heat',
   'gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots',
   'balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots',
@@ -1121,24 +1126,51 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     // ── CCTV (opens CameraViewer panel) ──
     map.on('click', 'cctv-dots', e => {
-      if (!e.features?.length) return;
-      const p = e.features[0].properties as any;
-      const coords = (e.features[0].geometry as any).coordinates;
-      // Emit the camera data so the CameraViewer opens
-      onEntityClick?.({
-        type: 'cctv',
-        id: p.id,
-        name: p.name,
-        city: p.city,
-        country: p.country,
-        source: p.source,
-        feed_url: p.feed_url,
-        stream_url: p.stream_url,
-        stream_type: p.stream_type,
-        external_url: p.external_url,
-        lat: coords[1],
-        lng: coords[0],
-      });
+      const feat = e.features ?? [];
+      if (!feat.length) return;
+      const emit = (f: MapGeoJSONFeature) => {
+        const p = f.properties as any;
+        const c = (f.geometry as any).coordinates;
+        onEntityClick?.({
+          type: 'cctv',
+          id: p.id,
+          name: p.name,
+          city: p.city,
+          country: p.country,
+          source: p.source,
+          feed_url: p.feed_url,
+          stream_url: p.stream_url,
+          stream_type: p.stream_type,
+          external_url: p.external_url,
+          lat: c[1],
+          lng: c[0],
+        });
+      };
+      /* Polaris parity — PreviewPopup: several cameras share one spot (a
+         junction's four approaches, a terminal's rows of poles). Picking the
+         first feature would always open the same one of those. */
+      if (feat.length > 1) {
+        const rows = feat.map((f: MapGeoJSONFeature, i: number) => {
+          const p = f.properties as any;
+          return `<a href="#" data-cam="${i}" style="display:block;padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.06);text-decoration:none;">
+            <span style="color:var(--gold-primary);font-size:9px;">${htmlEsc(p.name)}</span>
+            <span style="color:var(--text-muted);font-size:8px;display:block;">${htmlEsc(p.city)} · ${htmlEsc(p.source)}</span>
+          </a>`;
+        }).join('');
+        popup((feat[0].geometry as any).coordinates, `<div style="${pStyle}min-width:160px;max-width:220px;">
+          <div style="color:var(--gold-primary);font-size:9px;letter-spacing:0.15em;margin-bottom:4px;">${feat.length} KAMERA · TITIK INI</div>${rows}</div>`);
+        const popupEl = popupRef.current?.getElement();
+        popupEl?.querySelectorAll('[data-cam]').forEach(btn => {
+          btn.addEventListener('click', (ev: Event) => {
+            ev.preventDefault();
+            const f = feat[Number((btn as HTMLElement).dataset.cam)];
+            if (f) emit(f);
+          });
+        });
+        return;
+      }
+      const coords = (feat[0].geometry as any).coordinates;
+      emit(feat[0]);
       // Also fly to the camera
       map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 13), duration: 1000 });
     });
@@ -2213,8 +2245,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('cctv', activeLayers.cctv && data.cameras ? data.cameras.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { id: c.id, name: c.name, city: c.city, country: c.country, source: c.source, feed_url: c.feed_url, stream_url: c.stream_url, stream_type: c.stream_type, external_url: c.external_url } })) : []);
-  }, [mapReady, data.cameras, activeLayers.cctv, setGeo]);
+    /* Polaris parity: the category tiles filter the Indonesian layer the same
+       way the satellite tiles filter theirs — SEMUA (`cctv`) shows everything,
+       a sub-layer shows only its bucket (or a favorited camera). */
+    const anyCategory = CCTV_CATEGORY_LAYERS.some(k => activeLayers[k]);
+    const cams = activeLayers.cctv || anyCategory ? (data.cameras || []) : [];
+    const selected = activeLayers.cctv || !anyCategory ? null : new Set<string>(CCTV_CATEGORY_LAYERS.filter(k => activeLayers[k]));
+    const favs = data.cameraFavorites as Set<string> | undefined;
+    setGeo('cctv', cams
+      .filter((c: CctvCamera) => !selected || (selected.has('cctv_id_fav') && favs?.has(String(c.id))) || (c.category && selected.has(`cctv_id_${c.category}`)))
+      .map((c: CctvCamera) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { id: c.id, name: c.name, city: c.city, country: c.country, source: c.source, feed_url: c.feed_url, stream_url: c.stream_url, stream_type: c.stream_type, external_url: c.external_url, category: c.category } })));
+  }, [mapReady, data.cameras, data.cameraFavorites, activeLayers, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -2437,7 +2478,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['fl-private'], activeLayers.private);
     setVis(['fl-jets'], activeLayers.jets);
     setVis(['fl-military'], activeLayers.military);
-    setVis(['cctv-glow','cctv-dots','cctv-label'], activeLayers.cctv);
+    const anyCctv = activeLayers.cctv || CCTV_CATEGORY_LAYERS.some(k => activeLayers[k]);
+    setVis(['cctv-glow','cctv-dots','cctv-label'], anyCctv);
     setVis(['fires-heat'], activeLayers.fires);
     setVis(['weather-glow','weather-dots','weather-label'], activeLayers.weather);
     setVis(['infra-glow','infra-dots','infra-label'], activeLayers.infrastructure);

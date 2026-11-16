@@ -201,6 +201,20 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `(() => {
+              const origin = window.location.origin;
+              // hls.js fetches its manifest and segments through XHR, not
+              // fetch — without this, a relayed camera's playlist resolves
+              // to the basePath-less /api/... and every segment 404s.
+              const originalOpen = XMLHttpRequest.prototype.open;
+              XMLHttpRequest.prototype.open = function (method, url, ...args) {
+                const u = typeof url === 'string' ? url : String(url);
+                const mapped = u.startsWith('/api/')
+                  ? '/osiris' + u
+                  : u.startsWith(origin + '/api/')
+                    ? u.replace(origin + '/api/', origin + '/osiris/api/')
+                    : u;
+                return originalOpen.call(this, method, mapped, ...args);
+              };
               const originalFetch = window.fetch.bind(window);
               window.fetch = (input, init) => {
                 let url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);

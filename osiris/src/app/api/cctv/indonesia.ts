@@ -1,5 +1,5 @@
 import type { CctvCamera } from './types';
-import { indonesiaCameras, type PolarisCamera } from '@/lib/indonesia-cctv';
+import { indonesiaCameras, classifyCamera, type PolarisCamera } from '@/lib/indonesia-cctv';
 
 /**
  * OSIRIS — Indonesian public CCTV (Polaris parity).
@@ -26,6 +26,8 @@ function toOsirisCamera(cam: PolarisCamera): CctvCamera {
     city: cam.city,
     country: 'Indonesia',
     source: cam.sourceName,
+    /* Polaris parity: the 9-category filter the Phone-X panel offers. */
+    category: classifyCamera(cam),
   };
 
   const relay = cam.relayPlaylistUrl?.replace('/api/osiris/cctv/', '/api/cctv/relay/');

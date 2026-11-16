@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ExternalLink, RefreshCw, MapPin, Camera, CameraOff, Maximize2, PlayCircle } from 'lucide-react';
+import { X, ExternalLink, RefreshCw, MapPin, Camera, CameraOff, Maximize2, PlayCircle, Star } from 'lucide-react';
 import Hls from 'hls.js';
 import { isHostedOffPlatform, liveFeedAtSource, localEmbed, needsResolution, offPlatformView } from '@/lib/camera-feed';
 import { clearLook, registerVideo } from '@/lib/vision/store';
+import { isFavoriteCamera, toggleFavoriteCamera } from '@/lib/camera-favorites';
 import CameraVision, { VisionReport } from './CameraVision';
 
 interface CameraViewerProps {
@@ -23,6 +24,13 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
   const [retryCount, setRetryCount] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
+  /* Polaris parity: the star marks a camera; FAVORIT is one of the nine
+     category tiles and survives reloads through localStorage. */
+  const [favoriteTick, setFavoriteTick] = useState(0);
+  const favorite = useMemo(
+    () => Boolean(camera?.id) && isFavoriteCamera(String(camera.id)),
+    [camera?.id, favoriteTick],
+  );
 
   useEffect(() => {
     const iv = setInterval(() => {
@@ -247,6 +255,16 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                   {camera.lat && camera.lng && (
                     <button onClick={() => onLocate?.(camera.lat, camera.lng)} className="p-1.5 rounded-sm bg-white/5 border border-white/10 hover:bg-[var(--gold-primary)]/20 hover:border-[var(--gold-primary)] transition-all" title="Fly to location">
                       <MapPin className="w-3 h-3 text-[var(--text-secondary)] hover:text-[var(--gold-primary)]" />
+                    </button>
+                  )}
+                  {camera.id && (
+                    <button
+                      onClick={() => { if (camera.id) { toggleFavoriteCamera(String(camera.id)); setFavoriteTick(tick => tick + 1); } }}
+                      className="p-1.5 rounded-sm bg-white/5 border border-white/10 hover:bg-[var(--gold-primary)]/20 hover:border-[var(--gold-primary)] transition-all"
+                      title={favorite ? 'Remove favorite' : 'Add favorite'}
+                      style={favorite ? { background: 'rgba(255,255,255,0.12)', borderColor: 'var(--gold-primary)' } : {}}
+                    >
+                      <Star className="w-3 h-3" fill={favorite ? 'var(--gold-primary)' : 'none'} style={{ color: favorite ? 'var(--gold-primary)' : 'var(--text-secondary)' }} />
                     </button>
                   )}
                   <button onClick={() => setFullscreen(!fullscreen)} className="hidden md:block p-1.5 rounded-sm bg-white/5 border border-white/10 hover:bg-[var(--text-primary)]/20 hover:border-[var(--text-primary)] transition-all" title="Toggle fullscreen">

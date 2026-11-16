@@ -52,9 +52,15 @@ export function useCctvCameras(active: boolean): CctvData {
         const runtime = catalogs
           ? Object.values(catalogs.catalogs).flatMap((c) => c.cameras)
           : [];
+        // ponytail: dumped runtime catalogs may contain degenerate entries
+        // ({id, streamUrl:null} — e.g. bojonegoro when its portal is down).
+        // A camera without a name cannot be labeled and without coords
+        // cannot be placed, and an undefined name crashes wrapLabel().
+        const usable = (cam: PolarisCamera) =>
+          typeof cam.name === "string" && cam.name.trim() !== "" && cam.lat != null && cam.lng != null;
         const seen = new Set<string>();
         const merged: PolarisCamera[] = [];
-        for (const cam of [...bundle, ...runtime]) {
+        for (const cam of [...bundle, ...runtime].filter(usable)) {
           if (seen.has(cam.id)) continue;
           seen.add(cam.id);
           merged.push(cam);

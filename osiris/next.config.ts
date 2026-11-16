@@ -12,14 +12,14 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  /* Standalone output exists for the Docker image — the Dockerfile copies
-     .next/standalone. Vercel builds its own artifacts and does not want it:
-     since the 16.2.6 -> 16.3.4 bump its adapter fails packaging with
-     `ENOENT .next/next-server.js.nft.json` in onBuildComplete when a
-     Turbopack build also emits standalone. The build itself compiles fine,
-     which is why this only ever shows up on a deploy. Keep standalone
-     everywhere except Vercel, so Docker and the platform both get what they
-     expect. */
+  /* Standalone output serves the systemd production stack (hamsa.service
+     runs .next/standalone/server.js). Vercel builds its own artifacts and
+     does not want it: since the 16.2.6 -> 16.3.4 bump its adapter fails
+     packaging with `ENOENT .next/next-server.js.nft.json` in onBuildComplete
+     when a Turbopack build also emits standalone. The build itself compiles
+     fine, which is why this only ever shows up on a deploy. Keep standalone
+     everywhere except Vercel, so production and the platform both get what
+     they expect. */
   output: process.env.VERCEL ? undefined : 'standalone',
   /* onnxruntime-web runs the camera detector for forecasts, and loads its
      WebAssembly engine from its own folder at run time: bundling it would

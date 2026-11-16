@@ -59,7 +59,6 @@ const GROUPS: Array<{
     label: "Situation",
     items: [
       { href: "/osiris", label: "OSIRIS Global", icon: "globe" },
-      { href: "/polaris", label: "Polaris-X", icon: "globe" },
       { href: "/geofence-chain", label: "Tango chains", icon: "pin" },
     ],
   },

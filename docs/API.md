@@ -171,19 +171,6 @@ body in `x-hamsa-signature` (hex with optional `sha256=` prefix), keyed by
 Session-token routes accept `x-session-token`, `Authorization: Bearer`, or the cookie.
 `x-device-id` and `x-device-type` are recorded on the session when supplied.
 
-## Polaris-X (`/api/v1/osiris/*`)
-
-| Route | Returns |
-| --- | --- |
-| `POST preview/status` | Starts or reports the 5-minute preview window (`POLARIS_PREVIEW_EXPIRED` after cooldown) |
-| `GET bmkg` | BMKG earthquakes and weather warnings |
-| `GET news` | RSS headlines from Indonesian outlets |
-| `GET aviation/opensky`, `aviation/adsb` | Aircraft states |
-| `GET aviation/satellites` | Celestrak TLE-derived positions |
-| `GET cctv` | Catalogue status for every city |
-| `GET cctv/[city]/catalog` | One city's camera entries |
-| `GET cctv/[city]/[id]/frame` | Latest frame, only when `HAMSA_PUBLIC_CCTV_<SLUG>` is set |
-
 ## Geofence chains (`/api/v1/geofint/*`)
 
 `POST token` mints a 15-minute HMAC token for the public collection page. `POST chains`
@@ -323,7 +310,6 @@ Unauthenticated liveness probe. Returns `{"status":"ok","database":"reachable","
 | `/lookup/{hlr,whatsapp,getcontact,ewallet,breach,humint,public-evidence,name,domain,telegram-analytics}` | Phone-pivot and identity consoles |
 | `/tools/qr` | QR decode and encode |
 | `/graph` | Identity link graph |
-| `/polaris` | Polaris-X situational dashboard |
 | `/osiris-cctv` | Public CCTV catalogue |
 | `/geofence-chain` | Tango chain management |
 | `/t/[code]` | Public chain collection page (no login) |

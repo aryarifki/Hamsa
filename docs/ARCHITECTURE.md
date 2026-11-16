@@ -52,8 +52,6 @@ Server Components read the database directly — there is no internal HTTP hop b
 | `track/chain.ts` | Tango geofence chains and public reports | Codes are 8 chars from a 32-symbol alphabet; owner-scoped reads |
 | `track/geofence-preview.ts` | EXIF GPS extraction from uploaded stills | Returns `found:false` instead of guessing; RATIONAL is 8 bytes |
 | `intel/*` | One module per data domain | Each returns a uniform `ModuleResult` |
-| `intel/preview.ts` | Polaris-X preview window | 5 minutes active, 35 minutes cooldown, in-memory per process |
-| `intel/situational.ts` | Public feeds (BMKG, GDACS, OpenSky, Celestrak, FIRMS, RSS) | Every fetch is bounded by a timeout and reports its source |
 
 Every intelligence module returns the same shape:
 

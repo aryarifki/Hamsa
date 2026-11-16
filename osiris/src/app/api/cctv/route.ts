@@ -34,6 +34,7 @@ import { fetchIcelandCameras } from './iceland';
 import { fetchTaiwanCameras } from './taiwan';
 import { fetchThailandCameras } from './thailand';
 import { fetchAsiaLiveCameras } from './asia-live';
+import { fetchIndonesiaCameras } from './indonesia';
 import { fetchNewZealandCameras } from './newzealand';
 import { fetchLithuaniaCameras } from './lithuania';
 import { fetchEdmontonCameras } from './edmonton';
@@ -439,6 +440,10 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'taiwan': fetchTaiwanCameras,
   'thailand': fetchThailandCameras,
   'asia-live': fetchAsiaLiveCameras,
+  /* Indonesian CCTV first-party (Polaris parity): official portals, relayed
+     where this server fetches the upstream. Authoritative over OpenCCTV's
+     republished Indonesian rows, which mapRecord drops. */
+  'indonesia': fetchIndonesiaCameras,
   'newzealand': fetchNewZealandCameras,
   'lithuania': fetchLithuaniaCameras,
   'edmonton': fetchEdmontonCameras,
@@ -856,6 +861,8 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
 
   // Thailand — mainland through the Gulf islands
   if (lat > 5.5 && lat < 20.5 && lng > 97.3 && lng < 105.7) regions.push('thailand');
+  // Indonesia — the official portals Polaris catalogued, relayed first-party
+  if (lat > -11 && lat < 6.5 && lng > 94 && lng < 141.5) regions.push('indonesia');
 
   // Asia live webcams — spans West Asia (Turkey / Levant / Gulf) through Japan and Indonesia
   if (lat > -11 && lat < 46 && lng > 25 && lng < 155) regions.push('asia-live');

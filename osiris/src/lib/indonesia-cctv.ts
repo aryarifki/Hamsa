@@ -33,6 +33,8 @@ export interface PolarisCamera {
   relayPlaylistUrl?: string | null;
   /** Raw dump field (bojonegoro). */
   streamUrl?: string | null;
+  /** Snapshot/jpeg stream of a Zoneminder portal (bundle). */
+  publishedStreamUrl?: string | null;
   streamKind?: string;
   status?: string;
   updatedAt?: string;
@@ -202,6 +204,11 @@ export function segmentBaseFor(upstream: string): string {
  * ponytail: degenerate runtime entries (no name or no coordinates) are dropped
  * here rather than in the UI — an undefined name crashes label rendering and
  * bad coordinates place the marker nowhere.
+ *
+ * 434 bundle rows carry no id (Bondowoso's Zoneminder snapshots among them).
+ * Keying those by id alone would collapse all 434 into one; they get a
+ * stable coordinate-derived id instead, so every downstream consumer — the
+ * region's id dedupe, client list keys, favorites — sees them as distinct.
  */
 let mergedCache: PolarisCamera[] | null = null;
 
@@ -212,9 +219,10 @@ export function indonesiaCameras(): PolarisCamera[] {
   const seen = new Set<string>();
   const merged: PolarisCamera[] = [];
   for (const cam of [...BUNDLE, ...Object.values(RUNTIME_CATALOGS).flat()].filter(usable)) {
-    if (seen.has(cam.id)) continue;
-    seen.add(cam.id);
-    merged.push(cam);
+    const key = cam.id || `${cam.name}@${cam.lat},${cam.lng}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(cam.id ? cam : { ...cam, id: key });
   }
   mergedCache = merged;
   return merged;

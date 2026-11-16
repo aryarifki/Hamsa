@@ -128,6 +128,9 @@ export function mapRecord(rec: OpenCctvRecord): CctvCamera | null {
      jma-volcam://20301, ipcamlive://…) that only its site can resolve. A
      browser cannot load them, so the pin could only ever show a dead feed. */
   if (!/^https?:\/\//i.test(url)) return null;
+  /* Republished from the same official portals the `indonesia` region serves
+     first-party; keeping both would pin the same camera twice. */
+  if ((rec.country || '').trim().toLowerCase() === 'indonesia') return null;
   if (coveredElsewhere(url)) return null;
   /* Malaysia's LLM cameras point at the operator's own "camera offline"
      placeholder while a camera is down, and that path 404s. A pin that can
